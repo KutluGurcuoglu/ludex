@@ -60,7 +60,7 @@ export const categoryFitSchema = z.object({
 
 export const criterionEvaluationSchema = z.object({
   criterionId: z.string().min(1),
-  score: z.number().min(0),
+  score: z.number().min(0).nullable(),
   reason: z.string().min(1),
   evidence: z.string().min(1).optional(),
 });
