@@ -19,7 +19,7 @@ export function RouteGuard({
 
   useEffect(() => {
     if (hydrated && !authorized) {
-      router.replace("/");
+      router.replace("/login");
     }
   }, [hydrated, authorized, router]);
 

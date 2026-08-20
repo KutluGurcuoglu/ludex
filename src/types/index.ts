@@ -2,10 +2,27 @@
 
 export type UserRole = "admin" | "judge" | "contestant";
 
+/** Hakem başvurusunun admin tarafından onay durumu. */
+export type JudgeApprovalStatus = "pending" | "approved" | "rejected";
+
+/** Hakemin çalışma/eğitim durumu — admin başvuruyu değerlendirirken kullanır. */
+export type JudgeWorkStatus = "working" | "studying" | "both";
+
+export interface CompetitionDocument {
+  fileName: string;
+  fileUrl: string;
+  fileSizeBytes: number;
+  uploadedAt: string;
+}
+
 export interface Category {
   id: string;
   name: string;
   slug: string;
+  description?: string;
+  specification?: CompetitionDocument;
+  reportTemplate?: CompetitionDocument;
+  createdAt: string;
 }
 
 export interface User {
@@ -18,6 +35,40 @@ export interface User {
   /** contestant: tek kategori (ilk eleman) · judge: uzmanlık alanları (çoklu) */
   categoryIds: string[];
   createdAt: string;
+
+  // Kişisel bilgiler
+  isTurkishCitizen?: boolean;
+  nationalId?: string;
+  gender?: string;
+  birthDate?: string;
+  referralSource?: string;
+
+  // İletişim bilgileri
+  countryCode?: string;
+  country?: string;
+  city?: string;
+  district?: string;
+  address?: string;
+
+  // Eğitim bilgileri (yarışmacı/hakem)
+  educationLevel?: string;
+  school?: string;
+  faculty?: string;
+  department?: string;
+  grade?: string;
+  educationNote?: string;
+
+  // Görev bilgileri (yönetici)
+  jobTitle?: string;
+
+  // Hakem başvuru/onay bilgileri
+  judgeApprovalStatus?: JudgeApprovalStatus;
+  judgeWorkStatus?: JudgeWorkStatus;
+
+  // Bildirim tercihleri (varsayılan: açık)
+  notifyReportAssigned?: boolean;
+  notifyEvaluationUpdates?: boolean;
+  notifyProductUpdates?: boolean;
 }
 
 export type ReportStatus =
@@ -66,12 +117,9 @@ export interface ComplianceCheckItem {
   evidenceIds: string[];
 }
 
-export interface SimilarityMatch {
-  id: string;
-  sourceLabel: string;
-  matchPercentage: number;
-  excerpt: string;
-  evidenceIds: string[];
+export interface WritingStyleFlag {
+  page: number;
+  note: string;
 }
 
 export interface AIWritingRisk {
@@ -79,17 +127,73 @@ export interface AIWritingRisk {
   verdict: Severity;
   explanation: string;
   evidenceIds: string[];
+  flaggedSections: WritingStyleFlag[];
+}
+
+/** Rapor dili otomatik tespiti ve beklenen dille karşılaştırması. */
+export interface LanguageCheck {
+  detectedLanguage: string;
+  expectedLanguage: string;
+  passed: boolean;
+  confidence: number; // 0-100
+}
+
+/** Projenin seçtiği kategoriyle içerik olarak ne kadar örtüştüğüne dair AI kontrolü. */
+export interface CategoryFitCheck {
+  matchedCategoryId: string;
+  matchScore: number; // 0-100
+  passed: boolean;
+  explanation: string;
+}
+
+/** Şartnameden çıkarılan yapılandırılmış kural profili (yasaklar/zorunluluklar/teknik kurallar). */
+export interface RuleProfile {
+  prohibitions: string[];
+  requirements: string[];
+  technicalRules: string[];
+}
+
+/** "KRİTİK ŞARTNAME BULGUSU" — şartname ihlali ihtimali yüksek, hakemin karar vermesi gereken bulgu. */
+export interface CriticalSpecFinding {
+  id: string;
+  ruleText: string;
+  findingText: string;
+  probability: Severity;
+  evidenceId: string;
+}
+
+export interface ContentAnalysis {
+  summary: string;
+  strengths: string[];
+  weaknesses: string[];
+  improvementSuggestions: string[];
+}
+
+export interface SimilarityBreakdownItem {
+  sectionLabel: string;
+  matchPercentage: number;
+}
+
+export interface SimilarReportMatch {
+  id: string;
+  reportLabel: string;
+  matchPercentage: number;
+  breakdown: SimilarityBreakdownItem[];
 }
 
 export interface AIAnalysisResult {
   reportId: string;
   generatedAt: string;
+  languageCheck: LanguageCheck;
+  categoryFitCheck: CategoryFitCheck;
+  ruleProfile: RuleProfile;
+  criticalFindings: CriticalSpecFinding[];
   redFlags: RedFlag[];
   specCompliance: ComplianceCheckItem[];
   templateCompliance: ComplianceCheckItem[];
-  contentAnalysisSummary: string;
+  contentAnalysis: ContentAnalysis;
   similarityScore: number; // 0-100, genel benzerlik oranı
-  similarityMatches: SimilarityMatch[];
+  similarReports: SimilarReportMatch[];
   aiWritingRisk: AIWritingRisk;
   suggestedScore?: number;
   evidences: Evidence[];
@@ -110,6 +214,15 @@ export interface CriterionScore {
 
 export type EvaluationStatus = "draft" | "submitted";
 
+/** Hakemin bir kritik şartname bulgusu için "Elemeyi Öner" seçince kaydedilen karar. */
+export interface DisqualificationRecommendation {
+  findingId: string;
+  ruleText: string;
+  findingText: string;
+  evidenceId: string;
+  decidedAt: string;
+}
+
 export interface JudgeEvaluation {
   id: string;
   reportId: string;
@@ -118,6 +231,7 @@ export interface JudgeEvaluation {
   totalScore: number;
   overallComment: string;
   status: EvaluationStatus;
+  disqualificationRecommendation?: DisqualificationRecommendation | null;
   updatedAt: string;
 }
 

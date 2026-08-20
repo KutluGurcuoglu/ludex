@@ -16,16 +16,15 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { useAppStore } from "@/store/useAppStore";
+import { Loader2 } from "lucide-react";
+import * as authService from "@/services/auth.service";
 
 type Step = "request" | "verify" | "done";
 type Channel = "email" | "phone";
 
 export function ForgotPasswordDialog() {
-  const requestPasswordReset = useAppStore((s) => s.requestPasswordReset);
-  const resetPassword = useAppStore((s) => s.resetPassword);
-
   const [open, setOpen] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [step, setStep] = useState<Step>("request");
   const [channel, setChannel] = useState<Channel>("email");
   const [identifier, setIdentifier] = useState("");
@@ -47,11 +46,13 @@ export function ForgotPasswordDialog() {
     }
   }
 
-  function handleRequestSubmit(e: FormEvent) {
+  async function handleRequestSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
+    setSubmitting(true);
+    const result = await authService.requestPasswordReset(channel, identifier);
+    setSubmitting(false);
 
-    const result = requestPasswordReset(channel, identifier);
     if (!result.success) {
       setError(result.error ?? "Bir hata oluştu.");
       return;
@@ -66,7 +67,7 @@ export function ForgotPasswordDialog() {
     setStep("verify");
   }
 
-  function handleVerifySubmit(e: FormEvent) {
+  async function handleVerifySubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
 
@@ -75,7 +76,10 @@ export function ForgotPasswordDialog() {
       return;
     }
 
-    const result = resetPassword(code, newPassword);
+    setSubmitting(true);
+    const result = await authService.resetPassword(code, newPassword);
+    setSubmitting(false);
+
     if (!result.success) {
       setError(result.error ?? "Bir hata oluştu.");
       return;
@@ -147,8 +151,13 @@ export function ForgotPasswordDialog() {
               )}
 
               <DialogFooter>
-                <Button type="submit" className="w-full transition-transform active:scale-[0.98]">
-                  Doğrulama Kodu Gönder
+                <Button
+                  type="submit"
+                  disabled={submitting}
+                  className="w-full gap-1.5 transition-transform active:scale-[0.98]"
+                >
+                  {submitting && <Loader2 className="size-4 animate-spin" />}
+                  {submitting ? "Gönderiliyor..." : "Doğrulama Kodu Gönder"}
                 </Button>
               </DialogFooter>
             </form>
@@ -213,8 +222,13 @@ export function ForgotPasswordDialog() {
                 <Button type="button" variant="ghost" onClick={() => setStep("request")}>
                   Geri
                 </Button>
-                <Button type="submit" className="transition-transform active:scale-[0.98]">
-                  Şifreyi Güncelle
+                <Button
+                  type="submit"
+                  disabled={submitting}
+                  className="gap-1.5 transition-transform active:scale-[0.98]"
+                >
+                  {submitting && <Loader2 className="size-4 animate-spin" />}
+                  {submitting ? "Güncelleniyor..." : "Şifreyi Güncelle"}
                 </Button>
               </DialogFooter>
             </form>

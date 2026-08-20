@@ -1,18 +1,15 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { FileText, Gavel, ShieldCheck, Sparkles } from "lucide-react";
+import { ArrowRight, BrainCircuit, FileText, Gavel, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Separator } from "@/components/ui/separator";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ForgotPasswordDialog } from "@/components/auth/forgot-password-dialog";
-import { useAppStore, useCurrentUser, useHasHydrated } from "@/store/useAppStore";
+import { ThemeToggle } from "@/components/theme-toggle";
+import { ReportScanVisual } from "@/components/landing/report-scan-visual";
+import { AmbientGlow } from "@/components/landing/ambient-glow";
+import { useCurrentUser, useHasHydrated } from "@/store/useAppStore";
 import type { UserRole } from "@/types";
 
 const DASHBOARD_PATH: Record<UserRole, string> = {
@@ -21,45 +18,34 @@ const DASHBOARD_PATH: Record<UserRole, string> = {
   contestant: "/contestant",
 };
 
-export default function AuthPage() {
+const FEATURES = [
+  {
+    icon: BrainCircuit,
+    title: "AI Destekli Analiz",
+    desc: "Yüklenen raporlar yapay zekayla otomatik olarak taranır, hakemlere hazır bir özet ve ön değerlendirme sunulur.",
+  },
+  {
+    icon: FileText,
+    title: "Kolay Rapor Yükleme",
+    desc: "Yarışmacılar PDF raporlarını sürükle-bırak ile saniyeler içinde, kategori seçerek teslim eder.",
+  },
+  {
+    icon: Gavel,
+    title: "Adil Hakem Değerlendirmesi",
+    desc: "Hakemler kategori bazlı, şeffaf ve izlenebilir bir puanlama akışı üzerinden değerlendirme yapar.",
+  },
+];
+
+export default function LandingPage() {
   const router = useRouter();
   const hydrated = useHasHydrated();
   const currentUser = useCurrentUser();
-  const login = useAppStore((s) => s.login);
-  const register = useAppStore((s) => s.register);
-  const demoLogin = useAppStore((s) => s.demoLogin);
 
   useEffect(() => {
     if (hydrated && currentUser) {
       router.replace(DASHBOARD_PATH[currentUser.role]);
     }
   }, [hydrated, currentUser, router]);
-
-  const [loginEmail, setLoginEmail] = useState("");
-  const [loginPassword, setLoginPassword] = useState("");
-  const [loginError, setLoginError] = useState<string | null>(null);
-
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
-  const [password, setPassword] = useState("");
-  const [role, setRole] = useState<"contestant" | "judge">("contestant");
-  const [registerError, setRegisterError] = useState<string | null>(null);
-
-  function handleLogin(e: FormEvent) {
-    e.preventDefault();
-    setLoginError(null);
-    const result = login(loginEmail, loginPassword);
-    if (!result.success) setLoginError(result.error ?? "Giriş başarısız.");
-  }
-
-  function handleRegister(e: FormEvent) {
-    e.preventDefault();
-    setRegisterError(null);
-
-    const result = register({ name, email, phone, password, role });
-    if (!result.success) setRegisterError(result.error ?? "Kayıt başarısız.");
-  }
 
   if (!hydrated || currentUser) {
     return (
@@ -70,199 +56,79 @@ export default function AuthPage() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-gradient-to-b from-background to-muted/40 px-4 py-12">
-      <div className="w-full max-w-md space-y-6">
-        <div className="space-y-2 text-center">
-          <div className="mx-auto flex size-12 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-sm">
-            <ShieldCheck className="size-6" />
+    <div className="relative min-h-screen overflow-hidden bg-gradient-to-b from-background to-muted/40">
+      <AmbientGlow className="-z-10" />
+
+      <header className="flex items-center justify-between px-6 py-6 md:px-12">
+        <span className="text-brand-gradient text-xl font-extrabold tracking-tight">Ludex</span>
+        <div className="flex items-center gap-2">
+          <ThemeToggle />
+          <Button asChild size="sm" className="gap-1.5">
+            <Link href="/login">
+              Giriş Yap
+              <ArrowRight className="size-4" />
+            </Link>
+          </Button>
+        </div>
+      </header>
+
+      <main className="mx-auto flex max-w-6xl flex-col items-center px-6 pt-16 pb-24 md:pt-20">
+        <div className="grid w-full items-center gap-12 md:grid-cols-2 md:gap-8">
+          <div className="flex flex-col items-center text-center md:items-start md:text-left">
+            <div className="animate-in fade-in slide-in-from-bottom-4 duration-700 mb-6 inline-flex items-center gap-2 rounded-full border border-border/60 bg-card/60 px-4 py-1.5 text-sm text-muted-foreground backdrop-blur-sm">
+              <Sparkles className="size-4 animate-float-slow text-primary" />
+              Yapay zeka destekli değerlendirme
+            </div>
+
+            <h1 className="animate-in fade-in slide-in-from-bottom-6 duration-700 text-4xl font-extrabold tracking-[-0.03em] sm:text-5xl md:text-6xl">
+              Yarışma raporlarını
+              <br />
+              <span className="text-brand-gradient">saniyeler içinde</span> değerlendir
+            </h1>
+
+            <p className="animate-in fade-in slide-in-from-bottom-8 duration-700 mt-6 max-w-xl text-lg leading-relaxed text-muted-foreground">
+              Ludex; yarışmacı, hakem ve yönetici rollerini tek platformda birleştirir. AI
+              analiziyle raporları özetler, hakemlere adil ve hızlı bir değerlendirme akışı sunar.
+            </p>
+
+            <div className="animate-in fade-in slide-in-from-bottom-10 duration-700 mt-10 flex flex-wrap items-center justify-center gap-3 md:justify-start">
+              <Button asChild size="lg" className="gap-2 shadow-lg shadow-primary/30">
+                <Link href="/login">
+                  Hemen Başla
+                  <ArrowRight className="size-4" />
+                </Link>
+              </Button>
+              <Button asChild variant="outline" size="lg">
+                <Link href="/login">Demo ile Gir</Link>
+              </Button>
+            </div>
           </div>
-          <h1 className="text-2xl font-semibold tracking-[-0.02em]">Ludex</h1>
-          <p className="text-sm leading-relaxed text-muted-foreground">
-            AI destekli akıllı yarışma rapor değerlendirme platformu
-          </p>
+
+          <ReportScanVisual className="mx-auto w-full max-w-[320px] animate-in fade-in zoom-in-95 duration-1000 md:max-w-sm" />
         </div>
 
-        <Card className="border-border/60 bg-card/80 shadow-lg backdrop-blur-sm">
-          <CardContent className="pt-6">
-            <Tabs defaultValue="login">
-              <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger value="login">Giriş Yap</TabsTrigger>
-                <TabsTrigger value="register">Kayıt Ol</TabsTrigger>
-              </TabsList>
+        <div className="mt-24 grid w-full gap-6 sm:grid-cols-3">
+          {FEATURES.map((feature, i) => (
+            <Card
+              key={feature.title}
+              style={{ animationDelay: `${150 * i}ms` }}
+              className="animate-in fade-in slide-in-from-bottom-4 border-border/60 bg-card/70 text-left backdrop-blur-sm duration-700 fill-mode-both"
+            >
+              <CardContent className="pt-6">
+                <div className="mb-4 flex size-10 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-[var(--brand-glow-2)] text-primary-foreground">
+                  <feature.icon className="size-5" />
+                </div>
+                <h3 className="font-semibold">{feature.title}</h3>
+                <p className="mt-1.5 text-sm text-muted-foreground">{feature.desc}</p>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      </main>
 
-              <TabsContent value="login" className="mt-6">
-                <form onSubmit={handleLogin} className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="login-email">E-posta</Label>
-                    <Input
-                      id="login-email"
-                      type="email"
-                      required
-                      value={loginEmail}
-                      onChange={(e) => setLoginEmail(e.target.value)}
-                      placeholder="admin@ludex.com"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <Label htmlFor="login-password">Şifre</Label>
-                      <ForgotPasswordDialog />
-                    </div>
-                    <Input
-                      id="login-password"
-                      type="password"
-                      required
-                      value={loginPassword}
-                      onChange={(e) => setLoginPassword(e.target.value)}
-                      placeholder="••••••••"
-                    />
-                  </div>
-
-                  {loginError && (
-                    <Alert variant="destructive">
-                      <AlertDescription>{loginError}</AlertDescription>
-                    </Alert>
-                  )}
-
-                  <Button type="submit" className="w-full transition-transform active:scale-[0.98]">
-                    Giriş Yap
-                  </Button>
-
-                  <p className="text-center text-xs text-muted-foreground">
-                    Demo şifre tüm hesaplar için: <code className="font-mono">demo1234</code>
-                  </p>
-                </form>
-              </TabsContent>
-
-              <TabsContent value="register" className="mt-6">
-                <form onSubmit={handleRegister} className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="register-name">Ad Soyad</Label>
-                    <Input
-                      id="register-name"
-                      required
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                      placeholder="Adınız Soyadınız"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="register-email">E-posta</Label>
-                    <Input
-                      id="register-email"
-                      type="email"
-                      required
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      placeholder="ornek@mail.com"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="register-phone">Telefon No</Label>
-                    <Input
-                      id="register-phone"
-                      type="tel"
-                      required
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
-                      placeholder="+90 5xx xxx xx xx"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="register-password">Şifre</Label>
-                    <Input
-                      id="register-password"
-                      type="password"
-                      required
-                      minLength={6}
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      placeholder="En az 6 karakter"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label>Rolünüz</Label>
-                    <RadioGroup
-                      value={role}
-                      onValueChange={(v) => setRole(v as "contestant" | "judge")}
-                      className="grid grid-cols-2 gap-3"
-                    >
-                      <Label
-                        htmlFor="role-contestant"
-                        className={`flex cursor-pointer items-center gap-2 rounded-lg border p-3 text-sm transition-colors ${
-                          role === "contestant" ? "border-primary bg-primary/5" : "border-border"
-                        }`}
-                      >
-                        <RadioGroupItem value="contestant" id="role-contestant" />
-                        <FileText className="size-4" />
-                        Yarışmacı Girişi
-                      </Label>
-                      <Label
-                        htmlFor="role-judge"
-                        className={`flex cursor-pointer items-center gap-2 rounded-lg border p-3 text-sm transition-colors ${
-                          role === "judge" ? "border-primary bg-primary/5" : "border-border"
-                        }`}
-                      >
-                        <RadioGroupItem value="judge" id="role-judge" />
-                        <Gavel className="size-4" />
-                        Hakem Girişi
-                      </Label>
-                    </RadioGroup>
-                  </div>
-
-                  {registerError && (
-                    <Alert variant="destructive">
-                      <AlertDescription>{registerError}</AlertDescription>
-                    </Alert>
-                  )}
-
-                  <Button type="submit" className="w-full transition-transform active:scale-[0.98]">
-                    Kayıt Ol
-                  </Button>
-                </form>
-              </TabsContent>
-            </Tabs>
-
-            <div className="mt-6">
-              <div className="relative flex items-center">
-                <Separator className="flex-1" />
-                <span className="mx-3 shrink-0 text-xs text-muted-foreground">
-                  veya demo ile hızlı gir
-                </span>
-                <Separator className="flex-1" />
-              </div>
-
-              <div className="mt-4 grid grid-cols-3 gap-2">
-                <Button
-                  variant="outline"
-                  className="h-auto flex-col gap-1.5 py-3 transition-transform active:scale-[0.97]"
-                  onClick={() => demoLogin("admin")}
-                >
-                  <ShieldCheck className="size-4" />
-                  <span className="text-xs">Admin</span>
-                </Button>
-                <Button
-                  variant="outline"
-                  className="h-auto flex-col gap-1.5 py-3 transition-transform active:scale-[0.97]"
-                  onClick={() => demoLogin("judge")}
-                >
-                  <Gavel className="size-4" />
-                  <span className="text-xs">Hakem</span>
-                </Button>
-                <Button
-                  variant="outline"
-                  className="h-auto flex-col gap-1.5 py-3 transition-transform active:scale-[0.97]"
-                  onClick={() => demoLogin("contestant")}
-                >
-                  <Sparkles className="size-4" />
-                  <span className="text-xs">Yarışmacı</span>
-                </Button>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    </main>
+      <footer className="border-t border-border/60 px-6 py-6 text-center text-sm text-muted-foreground">
+        Ludex — AI Destekli Akıllı Yarışma Rapor Değerlendirme Platformu
+      </footer>
+    </div>
   );
 }

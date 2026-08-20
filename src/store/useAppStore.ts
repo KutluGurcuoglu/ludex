@@ -3,17 +3,77 @@ import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import type {
   Category,
+  CompetitionDocument,
+  JudgeApprovalStatus,
   JudgeEvaluation,
+  JudgeWorkStatus,
   Report,
   ReportStatus,
+  ScoreCriterion,
   User,
   UserRole,
 } from "@/types";
 
+function slugify(name: string) {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/ç/g, "c")
+    .replace(/ğ/g, "g")
+    .replace(/ı/g, "i")
+    .replace(/ö/g, "o")
+    .replace(/ş/g, "s")
+    .replace(/ü/g, "u")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+}
+
 const CATEGORIES: Category[] = [
-  { id: "cat-yz", name: "Yapay Zeka", slug: "yapay-zeka" },
-  { id: "cat-insansiz", name: "İnsansız Sistemler", slug: "insansiz-sistemler" },
-  { id: "cat-siber", name: "Siber Güvenlik", slug: "siber-guvenlik" },
+  {
+    id: "cat-yz",
+    name: "Yapay Zeka",
+    slug: "yapay-zeka",
+    createdAt: "2026-05-01T09:00:00.000Z",
+  },
+  {
+    id: "cat-insansiz",
+    name: "İnsansız Sistemler",
+    slug: "insansiz-sistemler",
+    createdAt: "2026-05-01T09:00:00.000Z",
+  },
+  {
+    id: "cat-siber",
+    name: "Siber Güvenlik",
+    slug: "siber-guvenlik",
+    createdAt: "2026-05-01T09:00:00.000Z",
+  },
+];
+
+const SCORE_CRITERIA: ScoreCriterion[] = [
+  {
+    id: "crit-content",
+    label: "İçerik ve Özgünlük",
+    maxScore: 30,
+    description: "Projenin özgünlüğü ve içerik derinliği",
+  },
+  {
+    id: "crit-technical",
+    label: "Teknik Yeterlilik",
+    maxScore: 30,
+    description: "Uygulanan yöntemin teknik sağlamlığı",
+  },
+  {
+    id: "crit-compliance",
+    label: "Şartnameye Uygunluk",
+    maxScore: 20,
+    description: "Yarışma şartnamesine uyum",
+  },
+  {
+    id: "crit-presentation",
+    label: "Sunum ve Raporlama Kalitesi",
+    maxScore: 20,
+    description: "Raporun anlaşılırlığı ve sunumu",
+  },
 ];
 
 const SEED_USERS: User[] = [
@@ -34,6 +94,8 @@ const SEED_USERS: User[] = [
     role: "judge",
     categoryIds: ["cat-yz", "cat-siber"],
     createdAt: "2026-06-02T09:00:00.000Z",
+    judgeApprovalStatus: "approved",
+    judgeWorkStatus: "working",
   },
   {
     id: "judge-2",
@@ -43,6 +105,8 @@ const SEED_USERS: User[] = [
     role: "judge",
     categoryIds: ["cat-insansiz"],
     createdAt: "2026-06-02T09:30:00.000Z",
+    judgeApprovalStatus: "approved",
+    judgeWorkStatus: "studying",
   },
   {
     id: "contestant-1",
@@ -140,6 +204,37 @@ const SEED_REPORTS: Report[] = [
   },
 ];
 
+const SEED_EVALUATIONS: JudgeEvaluation[] = [
+  {
+    id: "eval-report-4",
+    reportId: "report-4",
+    judgeId: "judge-1",
+    criteriaScores: [
+      {
+        criterionId: "crit-content",
+        score: 26,
+        comment: "Özgün bir yaklaşım, literatür taraması güçlü.",
+      },
+      {
+        criterionId: "crit-technical",
+        score: 25,
+        comment: "Model mimarisi sağlam, ancak test seti sınırlı.",
+      },
+      { criterionId: "crit-compliance", score: 18 },
+      {
+        criterionId: "crit-presentation",
+        score: 17,
+        comment: "Görselleştirmeler faydalı, anlatım akıcı.",
+      },
+    ],
+    totalScore: 86,
+    overallComment:
+      "Genel olarak başarılı, teknik derinliği yüksek bir çalışma. Test verisinin genişletilmesi önerilir.",
+    status: "submitted",
+    updatedAt: "2026-08-05T15:00:00.000Z",
+  },
+];
+
 interface PasswordResetRequest {
   userId: string;
   code: string;
@@ -148,8 +243,9 @@ interface PasswordResetRequest {
   expiresAt: number;
 }
 
-interface AppState {
+export interface AppState {
   categories: Category[];
+  scoreCriteria: ScoreCriterion[];
   users: User[];
   credentials: Record<string, string>;
   reports: Report[];
@@ -168,11 +264,57 @@ interface AppState {
   demoLogin: (role: UserRole) => void;
   logout: () => void;
 
+  updateProfile: (
+    userId: string,
+    updates: Partial<
+      Pick<
+        User,
+        | "name"
+        | "phone"
+        | "isTurkishCitizen"
+        | "nationalId"
+        | "gender"
+        | "birthDate"
+        | "referralSource"
+        | "countryCode"
+        | "country"
+        | "city"
+        | "district"
+        | "address"
+        | "educationLevel"
+        | "school"
+        | "faculty"
+        | "department"
+        | "grade"
+        | "educationNote"
+        | "jobTitle"
+        | "notifyReportAssigned"
+        | "notifyEvaluationUpdates"
+        | "notifyProductUpdates"
+      >
+    >,
+  ) => void;
+  deleteAccount: (userId: string) => void;
+
   requestPasswordReset: (
     channel: "email" | "phone",
     identifier: string,
   ) => { success: boolean; error?: string; code?: string };
   resetPassword: (code: string, newPassword: string) => { success: boolean; error?: string };
+  changePassword: (
+    userId: string,
+    currentPassword: string,
+    newPassword: string,
+  ) => { success: boolean; error?: string };
+
+  submitJudgeApplication: (
+    userId: string,
+    input: { categoryIds: string[]; workStatus: JudgeWorkStatus },
+  ) => void;
+  reviewJudgeApplication: (
+    userId: string,
+    decision: Exclude<JudgeApprovalStatus, "pending">,
+  ) => void;
 
   addReport: (input: {
     contestantId: string;
@@ -185,16 +327,33 @@ interface AppState {
   assignReports: (reportIds: string[], judgeId: string) => void;
   setReportStatus: (reportId: string, status: ReportStatus) => void;
   saveEvaluation: (evaluation: JudgeEvaluation) => void;
+
+  addCategory: (input: { name: string; description?: string }) => Category;
+  updateCategory: (id: string, updates: Partial<Pick<Category, "name" | "description">>) => void;
+  setCategorySpecification: (id: string, doc: CompetitionDocument) => void;
+  setCategoryTemplate: (id: string, doc: CompetitionDocument) => void;
+
+  addScoreCriterion: (input: {
+    label: string;
+    maxScore: number;
+    description?: string;
+  }) => ScoreCriterion;
+  updateScoreCriterion: (
+    id: string,
+    updates: Partial<Pick<ScoreCriterion, "label" | "maxScore" | "description">>,
+  ) => void;
+  deleteScoreCriterion: (id: string) => void;
 }
 
 export const useAppStore = create<AppState>()(
   persist(
     (set, get) => ({
       categories: CATEGORIES,
+      scoreCriteria: SCORE_CRITERIA,
       users: SEED_USERS,
       credentials: SEED_CREDENTIALS,
       reports: SEED_REPORTS,
-      evaluations: [],
+      evaluations: SEED_EVALUATIONS,
       currentUserId: null,
       passwordResetRequest: null,
 
@@ -227,6 +386,7 @@ export const useAppStore = create<AppState>()(
           role,
           categoryIds: [],
           createdAt: new Date().toISOString(),
+          ...(role === "judge" ? { judgeApprovalStatus: "pending" as const } : {}),
         };
 
         set((state) => ({
@@ -293,12 +453,64 @@ export const useAppStore = create<AppState>()(
         return { success: true };
       },
 
+      changePassword: (userId, currentPassword, newPassword) => {
+        const { users, credentials } = get();
+        const user = users.find((u) => u.id === userId);
+        if (!user) return { success: false, error: "Kullanıcı bulunamadı." };
+        if (credentials[user.email] !== currentPassword) {
+          return { success: false, error: "Mevcut şifren hatalı." };
+        }
+
+        set((state) => ({
+          credentials: { ...state.credentials, [user.email]: newPassword },
+        }));
+        return { success: true };
+      },
+
+      submitJudgeApplication: (userId, { categoryIds, workStatus }) => {
+        set((state) => ({
+          users: state.users.map((u) =>
+            u.id === userId
+              ? { ...u, categoryIds, judgeWorkStatus: workStatus, judgeApprovalStatus: "pending" }
+              : u,
+          ),
+        }));
+      },
+
+      reviewJudgeApplication: (userId, decision) => {
+        set((state) => ({
+          users: state.users.map((u) =>
+            u.id === userId ? { ...u, judgeApprovalStatus: decision } : u,
+          ),
+        }));
+      },
+
       demoLogin: (role) => {
         const user = get().users.find((u) => u.role === role);
         if (user) set({ currentUserId: user.id });
       },
 
       logout: () => set({ currentUserId: null }),
+
+      updateProfile: (userId, updates) => {
+        set((state) => ({
+          users: state.users.map((u) => (u.id === userId ? { ...u, ...updates } : u)),
+        }));
+      },
+
+      deleteAccount: (userId) => {
+        set((state) => {
+          const user = state.users.find((u) => u.id === userId);
+          const credentials = { ...state.credentials };
+          if (user) delete credentials[user.email];
+
+          return {
+            users: state.users.filter((u) => u.id !== userId),
+            credentials,
+            currentUserId: state.currentUserId === userId ? null : state.currentUserId,
+          };
+        });
+      },
 
       addReport: (input) => {
         const newReport: Report = {
@@ -353,6 +565,63 @@ export const useAppStore = create<AppState>()(
           return { evaluations, reports };
         });
       },
+
+      addCategory: ({ name, description }) => {
+        const newCategory: Category = {
+          id: `cat-${Date.now()}`,
+          name,
+          slug: slugify(name),
+          description,
+          createdAt: new Date().toISOString(),
+        };
+        set((state) => ({ categories: [...state.categories, newCategory] }));
+        return newCategory;
+      },
+
+      updateCategory: (id, updates) => {
+        set((state) => ({
+          categories: state.categories.map((c) => (c.id === id ? { ...c, ...updates } : c)),
+        }));
+      },
+
+      setCategorySpecification: (id, doc) => {
+        set((state) => ({
+          categories: state.categories.map((c) =>
+            c.id === id ? { ...c, specification: doc } : c,
+          ),
+        }));
+      },
+
+      setCategoryTemplate: (id, doc) => {
+        set((state) => ({
+          categories: state.categories.map((c) =>
+            c.id === id ? { ...c, reportTemplate: doc } : c,
+          ),
+        }));
+      },
+
+      addScoreCriterion: ({ label, maxScore, description }) => {
+        const newCriterion: ScoreCriterion = {
+          id: `crit-${Date.now()}`,
+          label,
+          maxScore,
+          description,
+        };
+        set((state) => ({ scoreCriteria: [...state.scoreCriteria, newCriterion] }));
+        return newCriterion;
+      },
+
+      updateScoreCriterion: (id, updates) => {
+        set((state) => ({
+          scoreCriteria: state.scoreCriteria.map((c) => (c.id === id ? { ...c, ...updates } : c)),
+        }));
+      },
+
+      deleteScoreCriterion: (id) => {
+        set((state) => ({
+          scoreCriteria: state.scoreCriteria.filter((c) => c.id !== id),
+        }));
+      },
     }),
     {
       name: "ludex-storage",
@@ -366,13 +635,18 @@ export const useAppStore = create<AppState>()(
 export const useCurrentUser = () =>
   useAppStore((state) => state.users.find((u) => u.id === state.currentUserId) ?? null);
 
-/** localStorage'dan rehydrate tamamlanana kadar false döner; SSR/CSR uyumsuzluğunu önler. */
+/**
+ * localStorage'dan rehydrate tamamlanana kadar false döner; SSR/CSR uyumsuzluğunu önler.
+ * Başlangıç değeri her zaman false olmalı (render sırasında hasHydrated() çağırmak,
+ * istemcide localStorage senkron döndüğü için sunucudan farklı bir ilk render'a
+ * (hydration mismatch) yol açabilir); gerçek durum yalnızca effect içinde okunur.
+ */
 export const useHasHydrated = () => {
-  const [hydrated, setHydrated] = useState(useAppStore.persist.hasHydrated());
+  const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
     const unsub = useAppStore.persist.onFinishHydration(() => setHydrated(true));
-    setHydrated(useAppStore.persist.hasHydrated());
+    if (useAppStore.persist.hasHydrated()) setHydrated(true);
     return unsub;
   }, []);
 
