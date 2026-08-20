@@ -1,69 +1,268 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import { useEffect, useState, type FormEvent } from "react";
+import { useRouter } from "next/navigation";
+import { FileText, Gavel, ShieldCheck, Sparkles } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ForgotPasswordDialog } from "@/components/auth/forgot-password-dialog";
+import { useAppStore, useCurrentUser, useHasHydrated } from "@/store/useAppStore";
+import type { UserRole } from "@/types";
+
+const DASHBOARD_PATH: Record<UserRole, string> = {
+  admin: "/admin",
+  judge: "/judge",
+  contestant: "/contestant",
+};
+
+export default function AuthPage() {
+  const router = useRouter();
+  const hydrated = useHasHydrated();
+  const currentUser = useCurrentUser();
+  const login = useAppStore((s) => s.login);
+  const register = useAppStore((s) => s.register);
+  const demoLogin = useAppStore((s) => s.demoLogin);
+
+  useEffect(() => {
+    if (hydrated && currentUser) {
+      router.replace(DASHBOARD_PATH[currentUser.role]);
+    }
+  }, [hydrated, currentUser, router]);
+
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [loginError, setLoginError] = useState<string | null>(null);
+
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
+  const [password, setPassword] = useState("");
+  const [role, setRole] = useState<"contestant" | "judge">("contestant");
+  const [registerError, setRegisterError] = useState<string | null>(null);
+
+  function handleLogin(e: FormEvent) {
+    e.preventDefault();
+    setLoginError(null);
+    const result = login(loginEmail, loginPassword);
+    if (!result.success) setLoginError(result.error ?? "Giriş başarısız.");
+  }
+
+  function handleRegister(e: FormEvent) {
+    e.preventDefault();
+    setRegisterError(null);
+
+    const result = register({ name, email, phone, password, role });
+    if (!result.success) setRegisterError(result.error ?? "Kayıt başarısız.");
+  }
+
+  if (!hydrated || currentUser) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="size-8 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-foreground" />
+      </div>
+    );
+  }
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+    <main className="flex min-h-screen items-center justify-center bg-gradient-to-b from-background to-muted/40 px-4 py-12">
+      <div className="w-full max-w-md space-y-6">
+        <div className="space-y-2 text-center">
+          <div className="mx-auto flex size-12 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-sm">
+            <ShieldCheck className="size-6" />
+          </div>
+          <h1 className="text-2xl font-semibold tracking-[-0.02em]">Ludex</h1>
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            AI destekli akıllı yarışma rapor değerlendirme platformu
           </p>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+
+        <Card className="border-border/60 bg-card/80 shadow-lg backdrop-blur-sm">
+          <CardContent className="pt-6">
+            <Tabs defaultValue="login">
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="login">Giriş Yap</TabsTrigger>
+                <TabsTrigger value="register">Kayıt Ol</TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="login" className="mt-6">
+                <form onSubmit={handleLogin} className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="login-email">E-posta</Label>
+                    <Input
+                      id="login-email"
+                      type="email"
+                      required
+                      value={loginEmail}
+                      onChange={(e) => setLoginEmail(e.target.value)}
+                      placeholder="admin@ludex.com"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <Label htmlFor="login-password">Şifre</Label>
+                      <ForgotPasswordDialog />
+                    </div>
+                    <Input
+                      id="login-password"
+                      type="password"
+                      required
+                      value={loginPassword}
+                      onChange={(e) => setLoginPassword(e.target.value)}
+                      placeholder="••••••••"
+                    />
+                  </div>
+
+                  {loginError && (
+                    <Alert variant="destructive">
+                      <AlertDescription>{loginError}</AlertDescription>
+                    </Alert>
+                  )}
+
+                  <Button type="submit" className="w-full transition-transform active:scale-[0.98]">
+                    Giriş Yap
+                  </Button>
+
+                  <p className="text-center text-xs text-muted-foreground">
+                    Demo şifre tüm hesaplar için: <code className="font-mono">demo1234</code>
+                  </p>
+                </form>
+              </TabsContent>
+
+              <TabsContent value="register" className="mt-6">
+                <form onSubmit={handleRegister} className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="register-name">Ad Soyad</Label>
+                    <Input
+                      id="register-name"
+                      required
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      placeholder="Adınız Soyadınız"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="register-email">E-posta</Label>
+                    <Input
+                      id="register-email"
+                      type="email"
+                      required
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="ornek@mail.com"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="register-phone">Telefon No</Label>
+                    <Input
+                      id="register-phone"
+                      type="tel"
+                      required
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                      placeholder="+90 5xx xxx xx xx"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="register-password">Şifre</Label>
+                    <Input
+                      id="register-password"
+                      type="password"
+                      required
+                      minLength={6}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="En az 6 karakter"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Rolünüz</Label>
+                    <RadioGroup
+                      value={role}
+                      onValueChange={(v) => setRole(v as "contestant" | "judge")}
+                      className="grid grid-cols-2 gap-3"
+                    >
+                      <Label
+                        htmlFor="role-contestant"
+                        className={`flex cursor-pointer items-center gap-2 rounded-lg border p-3 text-sm transition-colors ${
+                          role === "contestant" ? "border-primary bg-primary/5" : "border-border"
+                        }`}
+                      >
+                        <RadioGroupItem value="contestant" id="role-contestant" />
+                        <FileText className="size-4" />
+                        Yarışmacı Girişi
+                      </Label>
+                      <Label
+                        htmlFor="role-judge"
+                        className={`flex cursor-pointer items-center gap-2 rounded-lg border p-3 text-sm transition-colors ${
+                          role === "judge" ? "border-primary bg-primary/5" : "border-border"
+                        }`}
+                      >
+                        <RadioGroupItem value="judge" id="role-judge" />
+                        <Gavel className="size-4" />
+                        Hakem Girişi
+                      </Label>
+                    </RadioGroup>
+                  </div>
+
+                  {registerError && (
+                    <Alert variant="destructive">
+                      <AlertDescription>{registerError}</AlertDescription>
+                    </Alert>
+                  )}
+
+                  <Button type="submit" className="w-full transition-transform active:scale-[0.98]">
+                    Kayıt Ol
+                  </Button>
+                </form>
+              </TabsContent>
+            </Tabs>
+
+            <div className="mt-6">
+              <div className="relative flex items-center">
+                <Separator className="flex-1" />
+                <span className="mx-3 shrink-0 text-xs text-muted-foreground">
+                  veya demo ile hızlı gir
+                </span>
+                <Separator className="flex-1" />
+              </div>
+
+              <div className="mt-4 grid grid-cols-3 gap-2">
+                <Button
+                  variant="outline"
+                  className="h-auto flex-col gap-1.5 py-3 transition-transform active:scale-[0.97]"
+                  onClick={() => demoLogin("admin")}
+                >
+                  <ShieldCheck className="size-4" />
+                  <span className="text-xs">Admin</span>
+                </Button>
+                <Button
+                  variant="outline"
+                  className="h-auto flex-col gap-1.5 py-3 transition-transform active:scale-[0.97]"
+                  onClick={() => demoLogin("judge")}
+                >
+                  <Gavel className="size-4" />
+                  <span className="text-xs">Hakem</span>
+                </Button>
+                <Button
+                  variant="outline"
+                  className="h-auto flex-col gap-1.5 py-3 transition-transform active:scale-[0.97]"
+                  onClick={() => demoLogin("contestant")}
+                >
+                  <Sparkles className="size-4" />
+                  <span className="text-xs">Yarışmacı</span>
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </main>
   );
 }
