@@ -29,3 +29,23 @@ export type TemplateAnalysisCriterion = z.infer<
   typeof templateAnalysisCriterionSchema
 >;
 export type TemplateAnalysisOutput = z.infer<typeof templateAnalysisOutputSchema>;
+
+// Internal structured-output schemas for the two independent AI calls that
+// analyzeTemplate() merges into templateAnalysisOutputSchema above.
+
+export const templateSectionAnalysisOutputSchema = z.object({
+  sections: z.array(templateAnalysisSectionSchema),
+  warnings: z.array(z.string().min(1)),
+});
+
+export const templateCriteriaAnalysisOutputSchema = z.object({
+  evaluationCriteria: z.array(templateAnalysisCriterionSchema),
+  warnings: z.array(z.string().min(1)),
+});
+
+export type TemplateSectionAnalysisOutput = z.infer<
+  typeof templateSectionAnalysisOutputSchema
+>;
+export type TemplateCriteriaAnalysisOutput = z.infer<
+  typeof templateCriteriaAnalysisOutputSchema
+>;

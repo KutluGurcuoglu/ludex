@@ -1,4 +1,4 @@
-const CLOUDFLARE_MODEL = "@cf/openai/gpt-oss-20b";
+const DEFAULT_MODEL = "@cf/openai/gpt-oss-20b";
 
 interface CloudflareAiRunResponse {
   success: boolean;
@@ -6,10 +6,17 @@ interface CloudflareAiRunResponse {
   result?: unknown;
 }
 
+export type CloudflareStructuredJsonOptions = {
+  maxTokens?: number;
+  model?: string;
+  temperature?: number;
+};
+
 export async function fetchCloudflareStructuredJson(
   systemPrompt: string,
   userPrompt: string,
-  jsonSchema: object
+  jsonSchema: object,
+  options?: CloudflareStructuredJsonOptions
 ): Promise<unknown> {
   const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
   const apiToken = process.env.CLOUDFLARE_API_TOKEN;
@@ -20,7 +27,8 @@ export async function fetchCloudflareStructuredJson(
     );
   }
 
-  const endpoint = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/${CLOUDFLARE_MODEL}`;
+  const model = options?.model ?? DEFAULT_MODEL;
+  const endpoint = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/${model}`;
 
   const response = await fetch(endpoint, {
     method: "POST",
@@ -33,8 +41,8 @@ export async function fetchCloudflareStructuredJson(
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
-      max_tokens: 4096,
-      temperature: 0.2,
+      max_tokens: options?.maxTokens ?? 4096,
+      temperature: options?.temperature ?? 0.2,
       response_format: {
         type: "json_schema",
         json_schema: jsonSchema,
