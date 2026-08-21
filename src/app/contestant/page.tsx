@@ -16,6 +16,7 @@ import {
   UploadCloud,
   User as UserIcon,
   X,
+  XCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { RouteGuard } from "@/components/auth/route-guard";
@@ -63,6 +64,7 @@ const STATUS_LABEL: Record<ReportStatus, string> = {
   assigned: "Gönderildi",
   in_review: "Değerlendirmede",
   completed: "Tamamlandı",
+  disqualified: "Elendi",
 };
 
 const STATUS_BADGE_CLASS: Record<ReportStatus, string> = {
@@ -74,6 +76,8 @@ const STATUS_BADGE_CLASS: Record<ReportStatus, string> = {
     "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300",
   completed:
     "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300",
+  disqualified:
+    "border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300",
 };
 
 const STATUS_ICON: Record<ReportStatus, typeof Clock> = {
@@ -81,6 +85,7 @@ const STATUS_ICON: Record<ReportStatus, typeof Clock> = {
   assigned: Send,
   in_review: Clock,
   completed: CheckCircle2,
+  disqualified: XCircle,
 };
 
 type Section = "overview" | "submit" | "reports";
@@ -297,7 +302,9 @@ function ContestantDashboard() {
       title: title.trim(),
       fileName: file.name,
       fileSizeBytes: file.size,
-      pdfUrl: "/mock-pdfs/sample-report.pdf",
+      // Gerçek dosya içeriğini gösterir; bu blob URL sadece bu tarayıcı sekmesinde ve
+      // sayfa yenilenene kadar geçerlidir (backend'e taşınınca gerçek bir dosya URL'i olacak).
+      pdfUrl: URL.createObjectURL(file),
     });
     setSubmitting(false);
 
@@ -330,7 +337,7 @@ function ContestantDashboard() {
     <>
       <AppHeader subtitle={SECTION_META[activeSection].label} />
       <div className="min-h-[calc(100vh-4rem)]">
-        <div className="sticky top-16 z-30 flex items-center justify-between border-b border-border/60 bg-background/80 px-6 py-3 backdrop-blur-md md:px-12">
+        <div className="glass-toolbar sticky top-16 z-30 flex items-center justify-between px-6 py-3 md:px-12">
           <Button variant="outline" size="icon" onClick={() => setNavOpen(true)}>
             <Menu className="size-4" />
           </Button>
@@ -436,9 +443,9 @@ function ContestantDashboard() {
                     onDragLeave={() => setIsDragging(false)}
                     onDrop={handleDrop}
                     onClick={() => inputRef.current?.click()}
-                    className={`flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-6 py-10 text-center transition-colors ${
+                    className={`flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-6 py-10 text-center transition-all duration-200 active:scale-[0.98] ${
                       isDragging
-                        ? "border-primary bg-primary/5"
+                        ? "scale-[1.01] border-primary bg-primary/5"
                         : "border-border hover:border-primary/50"
                     }`}
                   >
@@ -528,7 +535,7 @@ function ContestantDashboard() {
                           <Icon className="size-3" />
                           {STATUS_LABEL[report.status]}
                         </Badge>
-                        {report.status === "completed" && (
+                        {(report.status === "completed" || report.status === "disqualified") && (
                           <Button
                             variant="outline"
                             size="sm"
@@ -590,6 +597,17 @@ function ContestantDashboard() {
 
               {detailEvaluation ? (
                 <div className="space-y-5">
+                  {detailEvaluation.disqualificationRecommendation?.adminDecision === "upheld" && (
+                    <div className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-base text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
+                      <XCircle className="mt-0.5 size-4 shrink-0" />
+                      <div>
+                        <p className="font-medium">Bu rapor elenmiştir</p>
+                        <p className="mt-0.5 text-sm">
+                          {detailEvaluation.disqualificationRecommendation.findingText}
+                        </p>
+                      </div>
+                    </div>
+                  )}
                   <div className="flex items-center justify-between rounded-xl bg-muted/50 px-4 py-3">
                     <span className="text-base font-medium text-muted-foreground">Toplam Puan</span>
                     <span className="text-2xl font-bold text-primary">
