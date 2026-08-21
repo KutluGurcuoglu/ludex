@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { AlertTriangle, Loader2, Plus, Sparkles, X } from "lucide-react";
+import { AlertTriangle, ChevronDown, Loader2, Plus, Search, Sparkles, X } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -15,6 +15,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Table,
   TableBody,
@@ -37,6 +43,72 @@ import { ReportTimeline } from "@/components/report-timeline";
 import { aggregateEvaluations } from "@/lib/scoring";
 import type { ReportStatus } from "@/types";
 import { formatDate, formatFileSize, STATUS_BADGE_CLASS, STATUS_LABEL } from "../_lib/shared";
+import type { User } from "@/types";
+
+/**
+ * Hakem seçim menüsü — arama kutusu içerir. Radix Select'in "item-aligned" konumlandırması
+ * (seçili değer boşken, ör. "+ hakem ekle" düğmesinde) hizalayacağı bir öğe bulamayınca
+ * menüyü tetikleyiciden uzakta/ekranın başka bir köşesinde açabiliyordu; DropdownMenu her
+ * zaman "popper" tarzı konumlandırma kullandığından bu sorunu doğrudan ortadan kaldırır.
+ */
+function JudgeSearchMenu({
+  judges,
+  categoryId,
+  onSelect,
+  trigger,
+}: {
+  judges: User[];
+  categoryId?: string;
+  onSelect: (judgeId: string) => void;
+  trigger: React.ReactNode;
+}) {
+  const [search, setSearch] = useState("");
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return judges;
+    return judges.filter((j) => j.name.toLowerCase().includes(q));
+  }, [judges, search]);
+
+  return (
+    <DropdownMenu
+      onOpenChange={(open) => {
+        if (!open) setSearch("");
+      }}
+    >
+      <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-64 p-0">
+        <div className="sticky top-0 z-10 border-b border-border bg-popover p-1.5">
+          <div className="relative">
+            <Search className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              autoFocus
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={(e) => e.stopPropagation()}
+              placeholder="Hakem ara..."
+              className="h-7 pl-7 text-sm"
+            />
+          </div>
+        </div>
+        <div className="max-h-64 overflow-y-auto p-1">
+          {filtered.length === 0 ? (
+            <p className="px-3 py-4 text-center text-sm text-muted-foreground">
+              Hakem bulunamadı.
+            </p>
+          ) : (
+            filtered.map((j) => (
+              <DropdownMenuItem key={j.id} onSelect={() => onSelect(j.id)}>
+                {j.name}
+                {categoryId && j.categoryIds.includes(categoryId) ? " ✓ Kategori uzmanı" : ""}
+              </DropdownMenuItem>
+            ))
+          )}
+        </div>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
 
 export default function AdminPoolPage() {
   const categories = useAppStore((s) => s.categories);
@@ -215,18 +287,16 @@ export default function AdminPoolPage() {
         <Card className="border-primary/30 bg-primary/5">
           <CardContent className="flex flex-wrap items-center gap-3 pt-6">
             <span className="text-base font-medium">{selectedIds.length} rapor seçildi</span>
-            <Select value={bulkJudgeId} onValueChange={setBulkJudgeId}>
-              <SelectTrigger className="w-[220px]">
-                <SelectValue placeholder="Hakem seç" />
-              </SelectTrigger>
-              <SelectContent>
-                {approvedJudges.map((j) => (
-                  <SelectItem key={j.id} value={j.id}>
-                    {j.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <JudgeSearchMenu
+              judges={approvedJudges}
+              onSelect={setBulkJudgeId}
+              trigger={
+                <Button variant="outline" className="w-[220px] justify-between font-normal">
+                  {judges.find((j) => j.id === bulkJudgeId)?.name ?? "Hakem seç"}
+                  <ChevronDown className="size-4 text-muted-foreground" />
+                </Button>
+              }
+            />
             <Button
               size="sm"
               disabled={!bulkJudgeId}
@@ -332,27 +402,22 @@ export default function AdminPoolPage() {
                             );
                           })}
                           {availableJudges.length > 0 && (
-                            <Select
-                              value=""
-                              onValueChange={(v) => requestAssign([report.id], v, report.title)}
-                            >
-                              <SelectTrigger
-                                className="h-6 w-6 shrink-0 justify-center rounded-full border-dashed p-0 [&>svg]:hidden"
-                                aria-label="Hakem ekle"
-                              >
-                                <Plus className="size-3.5" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {availableJudges.map((j) => (
-                                  <SelectItem key={j.id} value={j.id}>
-                                    {j.name}
-                                    {j.categoryIds.includes(report.categoryId)
-                                      ? " ✓ Kategori uzmanı"
-                                      : ""}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                            <JudgeSearchMenu
+                              judges={availableJudges}
+                              categoryId={report.categoryId}
+                              onSelect={(v) => requestAssign([report.id], v, report.title)}
+                              trigger={
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="icon-sm"
+                                  className="h-6 w-6 shrink-0 rounded-full border-dashed"
+                                  aria-label="Hakem ekle"
+                                >
+                                  <Plus className="size-3.5" />
+                                </Button>
+                              }
+                            />
                           )}
                         </div>
                       </TableCell>
