@@ -64,7 +64,9 @@ export function AppHeader({ subtitle }: { subtitle?: string } = {}) {
                 {user.name.slice(0, 2).toUpperCase()}
               </AvatarFallback>
             </Avatar>
-            <span className="hidden text-base font-medium sm:inline">{user.name}</span>
+            <span className="hidden text-base font-medium sm:inline">
+              {ROLE_LABELS[user.role]} Paneli
+            </span>
           </Link>
           <Button
             variant="ghost"

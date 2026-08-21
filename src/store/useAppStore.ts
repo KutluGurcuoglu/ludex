@@ -865,6 +865,40 @@ export const useAppStore = create<AppState>()(
               removeItem: () => {},
             },
       ),
+      version: 1,
+      /**
+       * v0 -> v1: Report.assignedJudgeId (tekil) -> assignedJudgeIds (dizi), ve
+       * credentials'taki düz metin şifreler SHA-256 hash'ine taşınır. Daha önce
+       * tarayıcıda kaydedilmiş veriyi kırmadan yeni şemaya geçirir.
+       */
+      migrate: async (persistedState) => {
+        const state = persistedState as {
+          reports?: Array<Record<string, unknown>>;
+          credentials?: Record<string, string>;
+        };
+
+        if (Array.isArray(state.reports)) {
+          state.reports = state.reports.map((r) => {
+            if (Array.isArray(r.assignedJudgeIds)) return r;
+            const legacyId = r.assignedJudgeId as string | undefined;
+            const rest = { ...r };
+            delete rest.assignedJudgeId;
+            return { ...rest, assignedJudgeIds: legacyId ? [legacyId] : [] };
+          });
+        }
+
+        if (state.credentials) {
+          const entries = await Promise.all(
+            Object.entries(state.credentials).map(async ([email, value]) => {
+              const looksHashed = /^[0-9a-f]{64}$/.test(value);
+              return [email, looksHashed ? value : await hashPassword(value)] as const;
+            }),
+          );
+          state.credentials = Object.fromEntries(entries);
+        }
+
+        return state;
+      },
     },
   ),
 );
