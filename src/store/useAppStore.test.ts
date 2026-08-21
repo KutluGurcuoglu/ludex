@@ -353,4 +353,48 @@ describe("useAppStore", () => {
       .notifications.find((n) => n.userId === "judge-2" && n.kind === "judge_application_reviewed");
     expect(notice?.channel).toBe("in_app_and_email");
   });
+
+  it("routes a support message from a judge to every admin", () => {
+    useAppStore.getState().sendSupportMessage("judge-1", "Rapor açılmıyor", "PDF yüklenmiyor.");
+
+    const ticket = useAppStore
+      .getState()
+      .supportMessages.find((m) => m.userId === "judge-1" && m.subject === "Rapor açılmıyor");
+    expect(ticket).toBeDefined();
+    expect(ticket?.resolvedAt).toBeFalsy();
+
+    const notice = useAppStore
+      .getState()
+      .notifications.find((n) => n.userId === "admin-1" && n.kind === "support_request");
+    expect(notice).toBeDefined();
+
+    useAppStore.getState().resolveSupportMessage(ticket!.id);
+    expect(
+      useAppStore.getState().supportMessages.find((m) => m.id === ticket!.id)?.resolvedAt,
+    ).toBeTruthy();
+  });
+
+  it("sends an announcement only to the selected audience", () => {
+    const countBoth = useAppStore.getState().sendAnnouncement({
+      audience: "judges",
+      title: "Bakım duyurusu",
+    });
+    expect(countBoth).toBeGreaterThan(0);
+
+    const judgeNotice = useAppStore
+      .getState()
+      .notifications.find((n) => n.userId === "judge-1" && n.title === "Bakım duyurusu");
+    const contestantNotice = useAppStore
+      .getState()
+      .notifications.find((n) => n.userId === "contestant-1" && n.title === "Bakım duyurusu");
+    expect(judgeNotice).toBeDefined();
+    expect(contestantNotice).toBeUndefined();
+
+    const customCount = useAppStore.getState().sendAnnouncement({
+      audience: "custom",
+      userIds: ["contestant-1"],
+      title: "Özel duyuru",
+    });
+    expect(customCount).toBe(1);
+  });
 });

@@ -3,7 +3,16 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { AlertOctagon, Gavel, LayoutGrid, List, Menu, UserCheck, Users } from "lucide-react";
+import {
+  AlertOctagon,
+  Gavel,
+  LayoutGrid,
+  LifeBuoy,
+  List,
+  Menu,
+  UserCheck,
+  Users,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { RouteGuard } from "@/components/auth/route-guard";
 import { AppHeader } from "@/components/layout/app-header";
@@ -15,6 +24,7 @@ import * as reportsService from "@/services/reports.service";
 import * as categoriesService from "@/services/categories.service";
 import * as usersService from "@/services/users.service";
 import * as evaluationsService from "@/services/evaluations.service";
+import * as supportService from "@/services/support.service";
 import {
   AdminSkeleton,
   APPROVAL_STATUS_BADGE_CLASS,
@@ -40,6 +50,7 @@ function AdminShell({ children }: { children: React.ReactNode }) {
   const users = useAppStore((s) => s.users);
   const evaluations = useAppStore((s) => s.evaluations);
   const reports = useAppStore((s) => s.reports);
+  const supportMessages = useAppStore((s) => s.supportMessages);
 
   const [isLoading, setIsLoading] = useState(true);
   const [navOpen, setNavOpen] = useState(false);
@@ -53,6 +64,7 @@ function AdminShell({ children }: { children: React.ReactNode }) {
       usersService.getUsers(),
       evaluationsService.getEvaluations(),
       evaluationsService.getScoreCriteria(),
+      supportService.getSupportMessages(),
     ]).then(() => {
       if (active) setIsLoading(false);
     });
@@ -79,6 +91,10 @@ function AdminShell({ children }: { children: React.ReactNode }) {
           reports.some((r) => r.id === e.reportId),
       ),
     [evaluations, reports],
+  );
+  const pendingSupportMessages = useMemo(
+    () => supportMessages.filter((m) => !m.resolvedAt),
+    [supportMessages],
   );
 
   const currentLabel =
@@ -125,6 +141,16 @@ function AdminShell({ children }: { children: React.ReactNode }) {
               >
                 <AlertOctagon className="size-3" />
                 {pendingDisqualifications.length} Elenme Önerisi
+              </Badge>
+            )}
+            {pendingSupportMessages.length > 0 && (
+              <Badge
+                variant="outline"
+                className="cursor-pointer gap-1.5 border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-300"
+                onClick={() => router.push("/admin/support")}
+              >
+                <LifeBuoy className="size-3" />
+                {pendingSupportMessages.length} Destek Talebi
               </Badge>
             )}
             <Badge variant="secondary" className="gap-1.5">

@@ -80,9 +80,21 @@ export interface User {
   /** KVKK Aydınlatma Metni ve Hakemlik Sözleşmesi'nin onaylandığı zaman. */
   judgeAgreementAcceptedAt?: string;
 
-  // Bildirim tercihleri (varsayılan: açık)
+  // Bildirim tercihleri (varsayılan: açık) — role göre farklı alt kümesi kullanılır.
+  /** Hakem: kendisine yeni bir rapor atandığında. */
   notifyReportAssigned?: boolean;
+  /** Yarışmacı: raporu değerlendirilip yayınlandığında. */
   notifyEvaluationUpdates?: boolean;
+  /** Hakem: gönderdiği bir değerlendirme admin tarafından onaylanıp yayınlandığında. */
+  notifyEvaluationApproved?: boolean;
+  /** Admin: yeni bir hakem başvurusu geldiğinde. */
+  notifyNewJudgeApplication?: boolean;
+  /** Admin: yeni bir rapor havuza düştüğünde. */
+  notifyNewReportSubmission?: boolean;
+  /** Admin: bir hakem elenme önerisinde bulunduğunda. */
+  notifyDisqualificationFlag?: boolean;
+  /** Admin: bir hakem/yarışmacı destek talebi gönderdiğinde. */
+  notifySupportRequest?: boolean;
   notifyProductUpdates?: boolean;
 }
 
@@ -263,8 +275,14 @@ export interface JudgeEvaluation {
 export type NotificationKind =
   | "report_assigned"
   | "evaluation_completed"
+  | "evaluation_approved"
   | "report_disqualified"
-  | "judge_application_reviewed";
+  | "judge_application_reviewed"
+  | "new_judge_application"
+  | "new_report_submission"
+  | "disqualification_flag"
+  | "support_request"
+  | "announcement";
 
 export interface AppNotification {
   id: string;
@@ -277,6 +295,18 @@ export interface AppNotification {
   readAt: string | null;
   /** Demo amaçlı: gerçek bir e-posta servisi yok, sadece "bu da e-posta olarak gitti" işareti. */
   channel?: "in_app" | "in_app_and_email";
+}
+
+/** Hakem/yarışmacı SSS'de çözüm bulamayınca admin'e gönderdiği destek talebi. */
+export interface SupportMessage {
+  id: string;
+  userId: string;
+  userName: string;
+  userRole: UserRole;
+  subject: string;
+  message: string;
+  createdAt: string;
+  resolvedAt?: string | null;
 }
 
 export interface CopilotChatMessage {

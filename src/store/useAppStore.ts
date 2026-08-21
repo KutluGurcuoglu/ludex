@@ -12,6 +12,7 @@ import type {
   Report,
   ReportStatus,
   ScoreCriterion,
+  SupportMessage,
   User,
   UserRole,
 } from "@/types";
@@ -54,6 +55,12 @@ function computeAggregateReportStatus(
   if (relevantEvaluations.length > 0) return "in_review";
   return "assigned";
 }
+
+const DASHBOARD_PATH_BY_ROLE: Record<UserRole, string> = {
+  admin: "/admin",
+  judge: "/judge",
+  contestant: "/contestant",
+};
 
 function slugify(name: string) {
   return name
@@ -301,11 +308,21 @@ export interface AppState {
   reports: Report[];
   evaluations: JudgeEvaluation[];
   notifications: AppNotification[];
+  supportMessages: SupportMessage[];
   currentUserId: string | null;
   passwordResetRequest: PasswordResetRequest | null;
 
   markNotificationRead: (id: string) => void;
   markAllNotificationsRead: (userId: string) => void;
+  sendSupportMessage: (userId: string, subject: string, message: string) => void;
+  resolveSupportMessage: (id: string) => void;
+  sendAnnouncement: (input: {
+    audience: "contestants" | "judges" | "both" | "custom";
+    userIds?: string[];
+    categoryId?: string;
+    title: string;
+    body?: string;
+  }) => number;
 
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   register: (input: {
@@ -344,6 +361,11 @@ export interface AppState {
         | "jobTitle"
         | "notifyReportAssigned"
         | "notifyEvaluationUpdates"
+        | "notifyEvaluationApproved"
+        | "notifyNewJudgeApplication"
+        | "notifyNewReportSubmission"
+        | "notifyDisqualificationFlag"
+        | "notifySupportRequest"
         | "notifyProductUpdates"
       >
     >,
@@ -424,6 +446,7 @@ export const useAppStore = create<AppState>()(
       reports: SEED_REPORTS,
       evaluations: SEED_EVALUATIONS,
       notifications: [],
+      supportMessages: [],
       currentUserId: null,
       passwordResetRequest: null,
 
@@ -555,27 +578,46 @@ export const useAppStore = create<AppState>()(
           agreementAccepted,
         },
       ) => {
-        set((state) => ({
-          users: state.users.map((u) =>
-            u.id === userId
-              ? {
-                  ...u,
-                  categoryIds,
-                  judgeWorkStatus: workStatus,
-                  judgeApprovalStatus: "pending",
-                  ...(jobTitle !== undefined ? { jobTitle } : {}),
-                  ...(department !== undefined ? { department } : {}),
-                  ...(expertiseArea !== undefined ? { expertiseArea } : {}),
-                  ...(academicProfileUrl !== undefined ? { academicProfileUrl } : {}),
-                  ...(cvFileName !== undefined ? { cvFileName } : {}),
-                  ...(customExpertiseTags !== undefined ? { customExpertiseTags } : {}),
-                  ...(agreementAccepted
-                    ? { judgeAgreementAcceptedAt: new Date().toISOString() }
-                    : {}),
-                }
-              : u,
-          ),
-        }));
+        set((state) => {
+          const applicant = state.users.find((u) => u.id === userId);
+          const admins = state.users.filter(
+            (u) => u.role === "admin" && u.notifyNewJudgeApplication !== false,
+          );
+
+          return {
+            users: state.users.map((u) =>
+              u.id === userId
+                ? {
+                    ...u,
+                    categoryIds,
+                    judgeWorkStatus: workStatus,
+                    judgeApprovalStatus: "pending",
+                    ...(jobTitle !== undefined ? { jobTitle } : {}),
+                    ...(department !== undefined ? { department } : {}),
+                    ...(expertiseArea !== undefined ? { expertiseArea } : {}),
+                    ...(academicProfileUrl !== undefined ? { academicProfileUrl } : {}),
+                    ...(cvFileName !== undefined ? { cvFileName } : {}),
+                    ...(customExpertiseTags !== undefined ? { customExpertiseTags } : {}),
+                    ...(agreementAccepted
+                      ? { judgeAgreementAcceptedAt: new Date().toISOString() }
+                      : {}),
+                  }
+                : u,
+            ),
+            notifications: [
+              ...admins.map((admin) =>
+                createNotification({
+                  userId: admin.id,
+                  kind: "new_judge_application",
+                  title: "Yeni hakem başvurusu",
+                  body: applicant?.name,
+                  link: "/admin/judge-applications",
+                }),
+              ),
+              ...state.notifications,
+            ],
+          };
+        });
       },
 
       reviewJudgeApplication: (userId, decision) => {
@@ -612,6 +654,81 @@ export const useAppStore = create<AppState>()(
             n.userId === userId && !n.readAt ? { ...n, readAt: now } : n,
           ),
         }));
+      },
+
+      sendSupportMessage: (userId, subject, message) => {
+        set((state) => {
+          const sender = state.users.find((u) => u.id === userId);
+          if (!sender) return state;
+
+          const ticket: SupportMessage = {
+            id: `support-${crypto.randomUUID()}`,
+            userId,
+            userName: sender.name,
+            userRole: sender.role,
+            subject,
+            message,
+            createdAt: new Date().toISOString(),
+            resolvedAt: null,
+          };
+
+          const admins = state.users.filter(
+            (u) => u.role === "admin" && u.notifySupportRequest !== false,
+          );
+          const notifications = admins.map((admin) =>
+            createNotification({
+              userId: admin.id,
+              kind: "support_request",
+              title: `Destek talebi: ${sender.name}`,
+              body: subject,
+              link: "/admin/support",
+            }),
+          );
+
+          return {
+            supportMessages: [ticket, ...state.supportMessages],
+            notifications: [...notifications, ...state.notifications],
+          };
+        });
+      },
+
+      resolveSupportMessage: (id) => {
+        set((state) => ({
+          supportMessages: state.supportMessages.map((m) =>
+            m.id === id ? { ...m, resolvedAt: new Date().toISOString() } : m,
+          ),
+        }));
+      },
+
+      sendAnnouncement: ({ audience, userIds, categoryId, title, body }) => {
+        const state = get();
+        let targets: User[];
+        if (audience === "custom") {
+          const idSet = new Set(userIds ?? []);
+          targets = state.users.filter((u) => idSet.has(u.id));
+        } else {
+          targets = state.users.filter((u) => {
+            if (audience === "contestants" && u.role !== "contestant") return false;
+            if (audience === "judges" && u.role !== "judge") return false;
+            if (audience === "both" && u.role !== "contestant" && u.role !== "judge") return false;
+            if (categoryId && !u.categoryIds.includes(categoryId)) return false;
+            return true;
+          });
+        }
+
+        if (targets.length === 0) return 0;
+
+        const notifications = targets.map((u) =>
+          createNotification({
+            userId: u.id,
+            kind: "announcement",
+            title,
+            body,
+            link: DASHBOARD_PATH_BY_ROLE[u.role],
+          }),
+        );
+        set((s) => ({ notifications: [...notifications, ...s.notifications] }));
+        return targets.length;
       },
 
       demoLogin: (role) => {
@@ -657,7 +774,26 @@ export const useAppStore = create<AppState>()(
           submittedAt: new Date().toISOString(),
         };
 
-        set((state) => ({ reports: [newReport, ...state.reports] }));
+        set((state) => {
+          const admins = state.users.filter(
+            (u) => u.role === "admin" && u.notifyNewReportSubmission !== false,
+          );
+          return {
+            reports: [newReport, ...state.reports],
+            notifications: [
+              ...admins.map((admin) =>
+                createNotification({
+                  userId: admin.id,
+                  kind: "new_report_submission",
+                  title: "Yeni rapor gönderildi",
+                  body: `${newReport.contestantName} · ${newReport.title}`,
+                  link: "/admin/pool",
+                }),
+              ),
+              ...state.notifications,
+            ],
+          };
+        });
         return newReport;
       },
 
@@ -710,10 +846,11 @@ export const useAppStore = create<AppState>()(
 
       saveEvaluation: (evaluation) => {
         set((state) => {
+          const previous = state.evaluations.find((e) => e.id === evaluation.id);
           const isFirstEvaluationForReport = !state.evaluations.some(
             (e) => e.reportId === evaluation.reportId,
           );
-          const evaluations = state.evaluations.some((e) => e.id === evaluation.id)
+          const evaluations = previous
             ? state.evaluations.map((e) => (e.id === evaluation.id ? evaluation : e))
             : [...state.evaluations, evaluation];
 
@@ -732,7 +869,35 @@ export const useAppStore = create<AppState>()(
           // Yarışmacıya bildirim burada gitmez: hakem bitirdiğinde sonuç henüz görünür
           // değildir (visibleToContestant), admin onaylayana ya da kategori toplu
           // yayınlanana kadar bekler (bkz. approveEvaluation / releaseCategoryResults).
-          return { evaluations, reports };
+          // Ama yeni bir elenme önerisi doğduysa admin hemen haberdar edilir.
+          const isNewDisqualificationFlag =
+            !!evaluation.disqualificationRecommendation &&
+            !previous?.disqualificationRecommendation;
+          const admins = isNewDisqualificationFlag
+            ? state.users.filter(
+                (u) => u.role === "admin" && u.notifyDisqualificationFlag !== false,
+              )
+            : [];
+          const report = reports.find((r) => r.id === evaluation.reportId);
+
+          return {
+            evaluations,
+            reports,
+            notifications: isNewDisqualificationFlag
+              ? [
+                  ...admins.map((admin) =>
+                    createNotification({
+                      userId: admin.id,
+                      kind: "disqualification_flag",
+                      title: "Elenme önerisi",
+                      body: report?.title,
+                      link: "/admin/disqualifications",
+                    }),
+                  ),
+                  ...state.notifications,
+                ]
+              : state.notifications,
+          };
         });
       },
 
@@ -800,22 +965,35 @@ export const useAppStore = create<AppState>()(
           const contestant = report
             ? state.users.find((u) => u.id === report.contestantId)
             : null;
-          const shouldNotify = report && contestant && contestant.notifyEvaluationUpdates !== false;
+          const judge = state.users.find((u) => u.id === evaluation.judgeId);
+
+          const newNotifications: AppNotification[] = [];
+          if (report && contestant && contestant.notifyEvaluationUpdates !== false) {
+            newNotifications.push(
+              createNotification({
+                userId: contestant.id,
+                kind: "evaluation_completed",
+                title: "Raporun değerlendirildi",
+                body: `${report.title} · ${evaluation.totalScore} puan`,
+                link: "/contestant",
+              }),
+            );
+          }
+          if (report && judge && judge.notifyEvaluationApproved !== false) {
+            newNotifications.push(
+              createNotification({
+                userId: judge.id,
+                kind: "evaluation_approved",
+                title: "Değerlendirmen yayınlandı",
+                body: report.title,
+                link: "/judge",
+              }),
+            );
+          }
 
           return {
             evaluations,
-            notifications: shouldNotify
-              ? [
-                  createNotification({
-                    userId: contestant.id,
-                    kind: "evaluation_completed",
-                    title: "Raporun değerlendirildi",
-                    body: `${report.title} · ${evaluation.totalScore} puan`,
-                    link: "/contestant",
-                  }),
-                  ...state.notifications,
-                ]
-              : state.notifications,
+            notifications: [...newNotifications, ...state.notifications],
           };
         });
       },
@@ -848,19 +1026,33 @@ export const useAppStore = create<AppState>()(
 
           const newNotifications = toRelease.flatMap((e) => {
             const report = state.reports.find((r) => r.id === e.reportId);
-            const contestant = report
-              ? state.users.find((u) => u.id === report.contestantId)
-              : null;
-            if (!report || !contestant || contestant.notifyEvaluationUpdates === false) return [];
-            return [
-              createNotification({
-                userId: contestant.id,
-                kind: "evaluation_completed",
-                title: "Raporun değerlendirildi",
-                body: `${report.title} · ${e.totalScore} puan`,
-                link: "/contestant",
-              }),
-            ];
+            if (!report) return [];
+            const contestant = state.users.find((u) => u.id === report.contestantId);
+            const judge = state.users.find((u) => u.id === e.judgeId);
+            const result: AppNotification[] = [];
+            if (contestant && contestant.notifyEvaluationUpdates !== false) {
+              result.push(
+                createNotification({
+                  userId: contestant.id,
+                  kind: "evaluation_completed",
+                  title: "Raporun değerlendirildi",
+                  body: `${report.title} · ${e.totalScore} puan`,
+                  link: "/contestant",
+                }),
+              );
+            }
+            if (judge && judge.notifyEvaluationApproved !== false) {
+              result.push(
+                createNotification({
+                  userId: judge.id,
+                  kind: "evaluation_approved",
+                  title: "Değerlendirmen yayınlandı",
+                  body: report.title,
+                  link: "/judge",
+                }),
+              );
+            }
+            return result;
           });
 
           return {

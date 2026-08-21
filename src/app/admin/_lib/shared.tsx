@@ -7,8 +7,10 @@ import {
   FileText,
   Gavel,
   LayoutDashboard,
+  LifeBuoy,
   ListChecks,
   Loader2,
+  Megaphone,
   Save,
   Send,
   Trophy,
@@ -87,10 +89,16 @@ export const NAV_ITEMS = [
   { href: "/admin/contestants", label: "Yarışmacılar", icon: Users },
   { href: "/admin/competitions", label: "Yarışmalar", icon: Trophy },
   { href: "/admin/criteria", label: "Değerlendirme Kriterleri", icon: ListChecks },
+  { href: "/admin/support", label: "Destek Talepleri", icon: LifeBuoy },
+  { href: "/admin/announcements", label: "Duyuru Gönder", icon: Megaphone },
 ] as const;
 
 /** Bu sayfalarda kutu/liste görünüm anahtarı gösterilmez (filtrelenecek bir liste değiller). */
-export const VIEW_TOGGLE_HIDDEN_PATHS = new Set(["/admin", "/admin/pool"]);
+export const VIEW_TOGGLE_HIDDEN_PATHS = new Set([
+  "/admin",
+  "/admin/pool",
+  "/admin/announcements",
+]);
 
 export function formatFileSize(bytes: number) {
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
