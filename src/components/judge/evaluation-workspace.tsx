@@ -68,6 +68,7 @@ import * as reportsService from "@/services/reports.service";
 import * as evaluationsService from "@/services/evaluations.service";
 import * as aiAnalysisService from "@/services/ai-analysis.service";
 import { simulateNetworkDelay } from "@/services/delay";
+import { buildHighlightQuery, highlightTextItem } from "@/lib/pdf-highlight";
 import type {
   AIAnalysisResult,
   ComplianceCheckItem,
@@ -487,6 +488,12 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
     setFocusedEvidenceId(evidenceId);
   }
 
+  const highlightQuery = useMemo(() => {
+    if (!focusedEvidenceId || !analysis) return null;
+    const evidence = analysis.evidences.find((e) => e.id === focusedEvidenceId);
+    return evidence ? buildHighlightQuery(evidence.excerpt) : null;
+  }, [focusedEvidenceId, analysis]);
+
   function requestFindingDecision(finding: GateFinding, decision: "flagged" | "dismissed") {
     setPendingDecision({ finding, decision });
   }
@@ -649,7 +656,12 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
                   }
                   className="mx-auto flex justify-center"
                 >
-                  <Page pageNumber={pageNumber} width={420} renderAnnotationLayer={false} />
+                  <Page
+                    pageNumber={pageNumber}
+                    width={420}
+                    renderAnnotationLayer={false}
+                    customTextRenderer={({ str }) => highlightTextItem(str, highlightQuery)}
+                  />
                 </Document>
               </div>
             </Card>
