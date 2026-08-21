@@ -50,7 +50,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { useAppStore, useCurrentUser } from "@/store/useAppStore";
+import { getEffectiveCriteria, useAppStore, useCurrentUser } from "@/store/useAppStore";
 import * as reportsService from "@/services/reports.service";
 import * as categoriesService from "@/services/categories.service";
 import * as evaluationsService from "@/services/evaluations.service";
@@ -193,7 +193,7 @@ function ContestantDashboard() {
   const categories = useAppStore((s) => s.categories);
   const reports = useAppStore((s) => s.reports);
   const evaluations = useAppStore((s) => s.evaluations);
-  const scoreCriteria = useAppStore((s) => s.scoreCriteria);
+  const globalScoreCriteria = useAppStore((s) => s.scoreCriteria);
 
   const [isLoading, setIsLoading] = useState(true);
   const [categoryId, setCategoryId] = useState("");
@@ -223,12 +223,14 @@ function ContestantDashboard() {
     };
   }, []);
 
+  const detailReport = reports.find((r) => r.id === detailReportId) ?? null;
+  const detailCategory = categories.find((c) => c.id === detailReport?.categoryId) ?? null;
+  const scoreCriteria = getEffectiveCriteria(detailCategory, globalScoreCriteria);
   const maxTotalScore = useMemo(
     () => scoreCriteria.reduce((sum, c) => sum + c.maxScore, 0),
     [scoreCriteria],
   );
 
-  const detailReport = reports.find((r) => r.id === detailReportId) ?? null;
   const detailReportEvaluations = useMemo(
     () => evaluations.filter((e) => e.reportId === detailReportId),
     [evaluations, detailReportId],

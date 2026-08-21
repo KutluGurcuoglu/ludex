@@ -102,6 +102,71 @@ const CATEGORIES: Category[] = [
   },
 ];
 
+function seedFromString(value: string): number {
+  let sum = 0;
+  for (const ch of value) sum += ch.charCodeAt(0);
+  return sum;
+}
+
+/**
+ * Şartname yüklendiğinde tetiklenen sahte "AI tarama": gerçek bir doküman analizi yapmaz,
+ * kategori kimliğinden türetilmiş sabit bir seçim yaparak her kategoriye kendi kriter
+ * setini verir — aynı kategori her seferinde aynı sonucu üretir.
+ */
+const CRITERION_POOL: { label: string; description: string }[] = [
+  {
+    label: "Kritik Tasarım Raporu (KTR) Uygunluğu",
+    description: "Şartnamede tanımlanan kritik tasarım gereksinimlerine uyum",
+  },
+  {
+    label: "Ön Tasarım Raporu (ÖTR) Bütünlüğü",
+    description: "Tasarım sürecinin ön rapor aşamasındaki tutarlılığı",
+  },
+  {
+    label: "Teknik Yeterlilik Formu (TYF) Uyumu",
+    description: "Teknik yeterlilik kriterlerinin karşılanma düzeyi",
+  },
+  { label: "Özgünlük ve Yenilikçilik", description: "Çözümün özgünlüğü ve mevcut yaklaşımlardan farkı" },
+  { label: "Şartnameye Uygunluk", description: "Yarışma şartnamesinde belirtilen kurallara uyum" },
+  { label: "Görev Performansı", description: "Görev senaryosundaki başarı ve performans" },
+  { label: "Güvenlik ve Risk Yönetimi", description: "Olası risklerin öngörülmesi ve alınan önlemler" },
+  { label: "Sunum ve Raporlama Kalitesi", description: "Raporun anlaşılırlığı, düzeni ve sunumu" },
+  { label: "Maliyet ve Sürdürülebilirlik", description: "Çözümün maliyet etkinliği ve sürdürülebilirliği" },
+  { label: "Test ve Doğrulama", description: "Yapılan testlerin kapsamı ve sonuçların güvenilirliği" },
+];
+
+const CRITERION_WEIGHT_SETS = [
+  [30, 30, 20, 20],
+  [35, 25, 25, 15],
+  [25, 25, 25, 25],
+  [40, 20, 20, 20],
+];
+
+function generateMockCriteriaFromSpecification(category: Pick<Category, "id" | "name">): ScoreCriterion[] {
+  const seed = seedFromString(category.id + category.name);
+  const startIdx = seed % CRITERION_POOL.length;
+  const weights = CRITERION_WEIGHT_SETS[seed % CRITERION_WEIGHT_SETS.length];
+
+  return weights.map((maxScore, i) => {
+    const pick = CRITERION_POOL[(startIdx + i * 3) % CRITERION_POOL.length];
+    return {
+      id: `crit-${category.id}-${crypto.randomUUID()}`,
+      label: pick.label,
+      maxScore,
+      description: pick.description,
+    };
+  });
+}
+
+/** Şartname yüklendiğinde önerilen gönderim penceresi: bugün açılır, 30 gün sonra kapanır. */
+function generateMockSubmissionWindow(): { opensAt: string; closesAt: string } {
+  const now = Date.now();
+  return {
+    opensAt: new Date(now).toISOString(),
+    closesAt: new Date(now + 30 * 24 * 60 * 60 * 1000).toISOString(),
+  };
+}
+
 const SCORE_CRITERIA: ScoreCriterion[] = [
   {
     id: "crit-content",
@@ -488,6 +553,22 @@ export interface AppState {
   updateCategory: (id: string, updates: Partial<Pick<Category, "name" | "description">>) => void;
   setCategorySpecification: (id: string, doc: CompetitionDocument) => void;
   setCategoryTemplate: (id: string, doc: CompetitionDocument) => void;
+  regenerateCategoryCriteria: (categoryId: string) => ScoreCriterion[];
+  addCategoryCriterion: (
+    categoryId: string,
+    input: { label: string; maxScore: number; description?: string },
+  ) => ScoreCriterion;
+  updateCategoryCriterion: (
+    categoryId: string,
+    criterionId: string,
+    updates: Partial<Pick<ScoreCriterion, "label" | "maxScore" | "description">>,
+  ) => void;
+  deleteCategoryCriterion: (categoryId: string, criterionId: string) => void;
+  setCategorySubmissionWindow: (
+    categoryId: string,
+    opensAt: string | null,
+    closesAt: string | null,
+  ) => void;
 
   addScoreCriterion: (input: {
     label: string;
@@ -1231,9 +1312,17 @@ export const useAppStore = create<AppState>()(
 
       setCategorySpecification: (id, doc) => {
         set((state) => ({
-          categories: state.categories.map((c) =>
-            c.id === id ? { ...c, specification: doc } : c,
-          ),
+          categories: state.categories.map((c) => {
+            if (c.id !== id) return c;
+            const window = generateMockSubmissionWindow();
+            return {
+              ...c,
+              specification: doc,
+              criteria: generateMockCriteriaFromSpecification(c),
+              submissionOpensAt: window.opensAt,
+              submissionClosesAt: window.closesAt,
+            };
+          }),
         }));
       },
 
@@ -1241,6 +1330,66 @@ export const useAppStore = create<AppState>()(
         set((state) => ({
           categories: state.categories.map((c) =>
             c.id === id ? { ...c, reportTemplate: doc } : c,
+          ),
+        }));
+      },
+
+      regenerateCategoryCriteria: (categoryId) => {
+        const category = get().categories.find((c) => c.id === categoryId);
+        if (!category) return [];
+        const criteria = generateMockCriteriaFromSpecification(category);
+        set((state) => ({
+          categories: state.categories.map((c) => (c.id === categoryId ? { ...c, criteria } : c)),
+        }));
+        return criteria;
+      },
+
+      addCategoryCriterion: (categoryId, { label, maxScore, description }) => {
+        const newCriterion: ScoreCriterion = {
+          id: `crit-${categoryId}-${crypto.randomUUID()}`,
+          label,
+          maxScore,
+          description,
+        };
+        set((state) => ({
+          categories: state.categories.map((c) =>
+            c.id === categoryId ? { ...c, criteria: [...(c.criteria ?? []), newCriterion] } : c,
+          ),
+        }));
+        return newCriterion;
+      },
+
+      updateCategoryCriterion: (categoryId, criterionId, updates) => {
+        set((state) => ({
+          categories: state.categories.map((c) =>
+            c.id === categoryId
+              ? {
+                  ...c,
+                  criteria: (c.criteria ?? []).map((cr) =>
+                    cr.id === criterionId ? { ...cr, ...updates } : cr,
+                  ),
+                }
+              : c,
+          ),
+        }));
+      },
+
+      deleteCategoryCriterion: (categoryId, criterionId) => {
+        set((state) => ({
+          categories: state.categories.map((c) =>
+            c.id === categoryId
+              ? { ...c, criteria: (c.criteria ?? []).filter((cr) => cr.id !== criterionId) }
+              : c,
+          ),
+        }));
+      },
+
+      setCategorySubmissionWindow: (categoryId, opensAt, closesAt) => {
+        set((state) => ({
+          categories: state.categories.map((c) =>
+            c.id === categoryId
+              ? { ...c, submissionOpensAt: opensAt, submissionClosesAt: closesAt }
+              : c,
           ),
         }));
       },
@@ -1358,6 +1507,14 @@ export const useAppStore = create<AppState>()(
     },
   ),
 );
+
+/** Bir kategorinin kendi kriterleri varsa onları, yoksa global varsayılan kriterleri döner. */
+export function getEffectiveCriteria(
+  category: Pick<Category, "criteria"> | null | undefined,
+  globalCriteria: ScoreCriterion[],
+): ScoreCriterion[] {
+  return category?.criteria && category.criteria.length > 0 ? category.criteria : globalCriteria;
+}
 
 export const useCurrentUser = () =>
   useAppStore((state) => state.users.find((u) => u.id === state.currentUserId) ?? null);

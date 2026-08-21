@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { useAppStore } from "@/store/useAppStore";
+import { getEffectiveCriteria, useAppStore } from "@/store/useAppStore";
 import { formatDate, STATUS_BADGE_CLASS, STATUS_LABEL, useViewMode } from "../_lib/shared";
 
 export default function AdminContestantsPage() {
@@ -16,7 +16,7 @@ export default function AdminContestantsPage() {
   const users = useAppStore((s) => s.users);
   const reports = useAppStore((s) => s.reports);
   const evaluations = useAppStore((s) => s.evaluations);
-  const scoreCriteria = useAppStore((s) => s.scoreCriteria);
+  const globalScoreCriteria = useAppStore((s) => s.scoreCriteria);
   const { viewMode } = useViewMode();
 
   const contestants = useMemo(() => users.filter((u) => u.role === "contestant"), [users]);
@@ -33,11 +33,6 @@ export default function AdminContestantsPage() {
         c.phone.replace(/\s/g, "").includes(q.replace(/\s/g, "")),
     );
   }, [contestants, contestantSearch]);
-
-  const maxTotalScore = useMemo(
-    () => scoreCriteria.reduce((sum, c) => sum + c.maxScore, 0),
-    [scoreCriteria],
-  );
 
   const selectedContestant = contestants.find((c) => c.id === selectedContestantId) ?? null;
   const selectedContestantReports = selectedContestant
@@ -162,7 +157,11 @@ export default function AdminContestantsPage() {
                             </p>
                             {evaluation && (
                               <p className="mt-1 text-sm font-medium text-primary">
-                                Puan: {evaluation.totalScore} / {maxTotalScore}
+                                Puan: {evaluation.totalScore} /{" "}
+                                {getEffectiveCriteria(category, globalScoreCriteria).reduce(
+                                  (sum, c) => sum + c.maxScore,
+                                  0,
+                                )}
                               </p>
                             )}
                           </div>

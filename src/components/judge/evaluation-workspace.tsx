@@ -63,7 +63,7 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
-import { useAppStore, useCurrentUser } from "@/store/useAppStore";
+import { getEffectiveCriteria, useAppStore, useCurrentUser } from "@/store/useAppStore";
 import * as reportsService from "@/services/reports.service";
 import * as evaluationsService from "@/services/evaluations.service";
 import * as aiAnalysisService from "@/services/ai-analysis.service";
@@ -289,8 +289,11 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
   const user = useCurrentUser();
   const report = useAppStore((s) => s.reports.find((r) => r.id === reportId)) ?? null;
   const categories = useAppStore((s) => s.categories);
-  const scoreCriteria = useAppStore((s) => s.scoreCriteria);
+  const globalScoreCriteria = useAppStore((s) => s.scoreCriteria);
   const evaluations = useAppStore((s) => s.evaluations);
+
+  const category = categories.find((c) => c.id === report?.categoryId) ?? null;
+  const scoreCriteria = getEffectiveCriteria(category, globalScoreCriteria);
 
   const [isLoading, setIsLoading] = useState(true);
   const [analysisState, setAnalysisState] = useState<AnalysisState>("idle");
@@ -597,8 +600,6 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
       </>
     );
   }
-
-  const category = categories.find((c) => c.id === report.categoryId);
 
   return (
     <>

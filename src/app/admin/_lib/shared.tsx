@@ -11,8 +11,12 @@ import {
   ListChecks,
   Loader2,
   Megaphone,
+  Pencil,
+  Plus,
   Save,
   Send,
+  Sparkles,
+  Trash2,
   Trophy,
   UploadCloud,
   UserCheck,
@@ -28,9 +32,17 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useAppStore } from "@/store/useAppStore";
 import * as categoriesService from "@/services/categories.service";
-import type { Category, JudgeApprovalStatus, JudgeWorkStatus, ReportStatus } from "@/types";
+import type { Category, JudgeApprovalStatus, JudgeWorkStatus, ReportStatus, ScoreCriterion } from "@/types";
 
 function toLocalInputValue(iso: string) {
   const d = new Date(iso);
@@ -379,6 +391,276 @@ function EvaluationDeadlineSection({ category }: { category: Category }) {
   );
 }
 
+/**
+ * Bir kategorinin değerlendirme kriterleri. Şartname yüklendiğinde AI tarafından otomatik
+ * oluşturulur (bkz. setCategorySpecification); admin burada elle düzenleyebilir. Kategorinin
+ * kendi kriteri yoksa bu bölüm gizlenir — hakemler global varsayılan kriterleri kullanır.
+ */
+function CriteriaSection({ category }: { category: Category }) {
+  const criteria = category.criteria ?? [];
+  const maxTotal = criteria.reduce((sum, c) => sum + c.maxScore, 0);
+
+  const [regenerating, setRegenerating] = useState(false);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [label, setLabel] = useState("");
+  const [maxScore, setMaxScore] = useState("");
+  const [description, setDescription] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  async function handleRegenerate() {
+    setRegenerating(true);
+    const next = await categoriesService.regenerateCategoryCriteria(category.id);
+    setRegenerating(false);
+    toast.success(`AI ${next.length} kriteri yeniden oluşturdu.`);
+  }
+
+  function openCreate() {
+    setEditingId(null);
+    setLabel("");
+    setMaxScore("");
+    setDescription("");
+    setDialogOpen(true);
+  }
+
+  function openEdit(criterion: ScoreCriterion) {
+    setEditingId(criterion.id);
+    setLabel(criterion.label);
+    setMaxScore(String(criterion.maxScore));
+    setDescription(criterion.description ?? "");
+    setDialogOpen(true);
+  }
+
+  async function handleSave(e: FormEvent) {
+    e.preventDefault();
+    const score = Number(maxScore);
+    if (!label.trim() || !Number.isFinite(score) || score <= 0) return;
+
+    setSaving(true);
+    if (editingId) {
+      await categoriesService.updateCategoryCriterion(category.id, editingId, {
+        label: label.trim(),
+        maxScore: score,
+        description: description.trim() || undefined,
+      });
+    } else {
+      await categoriesService.addCategoryCriterion(category.id, {
+        label: label.trim(),
+        maxScore: score,
+        description: description.trim() || undefined,
+      });
+    }
+    setSaving(false);
+    toast.success(editingId ? "Kriter güncellendi." : "Yeni kriter eklendi.");
+    setDialogOpen(false);
+  }
+
+  async function handleDelete(criterionId: string) {
+    setDeletingId(criterionId);
+    await categoriesService.deleteCategoryCriterion(category.id, criterionId);
+    setDeletingId(null);
+    toast.success("Kriter silindi.");
+  }
+
+  if (criteria.length === 0) {
+    return (
+      <div className="space-y-3">
+        <Label>Değerlendirme Kriterleri</Label>
+        <p className="text-sm text-muted-foreground">
+          Bu kategorinin kendi kriteri yok, hakemler varsayılan kriterleri kullanıyor. Şartname
+          yükleyince AI bu kategoriye özel kriterler önerir.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <Label>Değerlendirme Kriterleri</Label>
+        <Badge variant="outline">toplam {maxTotal} puan</Badge>
+      </div>
+
+      <div className="space-y-2">
+        {criteria.map((criterion) => (
+          <div
+            key={criterion.id}
+            className="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2"
+          >
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium">{criterion.label}</p>
+              {criterion.description && (
+                <p className="truncate text-xs text-muted-foreground">{criterion.description}</p>
+              )}
+            </div>
+            <div className="flex shrink-0 items-center gap-1.5">
+              <Badge variant="secondary">{criterion.maxScore} puan</Badge>
+              <Button size="icon" variant="ghost" className="size-7" onClick={() => openEdit(criterion)}>
+                <Pencil className="size-3.5" />
+              </Button>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="size-7 text-destructive hover:bg-destructive/10"
+                disabled={deletingId === criterion.id}
+                onClick={() => handleDelete(criterion.id)}
+              >
+                {deletingId === criterion.id ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <Trash2 className="size-3.5" />
+                )}
+              </Button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="flex gap-2">
+        <Button size="sm" variant="outline" className="flex-1 gap-1.5" onClick={openCreate}>
+          <Plus className="size-3.5" />
+          Kriter Ekle
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={regenerating}
+          className="flex-1 gap-1.5"
+          onClick={handleRegenerate}
+        >
+          {regenerating ? (
+            <Loader2 className="size-3.5 animate-spin" />
+          ) : (
+            <Sparkles className="size-3.5" />
+          )}
+          AI ile Yeniden Oluştur
+        </Button>
+      </div>
+
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>{editingId ? "Kriteri Düzenle" : "Yeni Kriter Ekle"}</DialogTitle>
+            <DialogDescription>Bu kategoriye özel bir değerlendirme kriteri tanımla.</DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleSave} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor={`cat-crit-label-${category.id}`}>Kriter Adı</Label>
+              <Input
+                id={`cat-crit-label-${category.id}`}
+                required
+                value={label}
+                onChange={(e) => setLabel(e.target.value)}
+                placeholder="Örn: Teknik Yeterlilik Formu (TYF) Uyumu"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor={`cat-crit-score-${category.id}`}>Maksimum Puan</Label>
+              <Input
+                id={`cat-crit-score-${category.id}`}
+                type="number"
+                min={1}
+                max={100}
+                required
+                value={maxScore}
+                onChange={(e) => setMaxScore(e.target.value)}
+                placeholder="Örn: 25"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor={`cat-crit-desc-${category.id}`}>Açıklama (opsiyonel)</Label>
+              <Textarea
+                id={`cat-crit-desc-${category.id}`}
+                rows={2}
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+              />
+            </div>
+            <DialogFooter>
+              <Button
+                type="submit"
+                disabled={saving}
+                className="w-full gap-1.5 transition-transform active:scale-[0.98]"
+              >
+                {saving && <Loader2 className="size-4 animate-spin" />}
+                {editingId ? "Kaydet" : "Ekle"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+/**
+ * Yarışmacıların bu kategoriye rapor gönderebileceği tarih aralığı. Şartname yüklendiğinde
+ * AI tarafından önerilir; admin burada değiştirebilir veya süreyi uzatabilir. İkisi de boşsa
+ * gönderim her zaman açıktır (bkz. contestant panelindeki "Rapor Gönder" kapısı).
+ */
+function SubmissionWindowSection({ category }: { category: Category }) {
+  const [opensAt, setOpensAt] = useState(
+    category.submissionOpensAt ? toLocalInputValue(category.submissionOpensAt) : "",
+  );
+  const [closesAt, setClosesAt] = useState(
+    category.submissionClosesAt ? toLocalInputValue(category.submissionClosesAt) : "",
+  );
+  const [saving, setSaving] = useState(false);
+
+  async function handleSave(e: FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    await categoriesService.setCategorySubmissionWindow(
+      category.id,
+      opensAt ? new Date(opensAt).toISOString() : null,
+      closesAt ? new Date(closesAt).toISOString() : null,
+    );
+    setSaving(false);
+    toast.success("Gönderim takvimi güncellendi.");
+  }
+
+  return (
+    <div className="space-y-3">
+      <Label>Rapor Gönderim Takvimi</Label>
+      <p className="text-sm text-muted-foreground">
+        Yarışmacılar yalnızca bu aralıkta rapor gönderebilir. İkisi de boş bırakılırsa gönderim
+        her zaman açık olur.
+      </p>
+      <form onSubmit={handleSave} className="space-y-3">
+        <div className="grid grid-cols-2 gap-2">
+          <div className="space-y-1.5">
+            <Label htmlFor={`sub-opens-${category.id}`} className="text-sm text-muted-foreground">
+              Açılış
+            </Label>
+            <Input
+              id={`sub-opens-${category.id}`}
+              type="datetime-local"
+              value={opensAt}
+              onChange={(e) => setOpensAt(e.target.value)}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor={`sub-closes-${category.id}`} className="text-sm text-muted-foreground">
+              Kapanış
+            </Label>
+            <Input
+              id={`sub-closes-${category.id}`}
+              type="datetime-local"
+              value={closesAt}
+              onChange={(e) => setClosesAt(e.target.value)}
+            />
+          </div>
+        </div>
+        <Button type="submit" size="sm" variant="outline" disabled={saving} className="w-full gap-1.5">
+          {saving && <Loader2 className="size-4 animate-spin" />}
+          Takvimi Kaydet
+        </Button>
+      </form>
+    </div>
+  );
+}
+
 export function CompetitionEditSheet({ competition }: { competition: Category }) {
   const [name, setName] = useState(competition.name);
   const [description, setDescription] = useState(competition.description ?? "");
@@ -399,14 +681,16 @@ export function CompetitionEditSheet({ competition }: { competition: Category })
 
   async function handleSpecFile(file: File) {
     setUploadingSpec(true);
-    await categoriesService.uploadCategorySpecification(competition.id, {
+    const updated = await categoriesService.uploadCategorySpecification(competition.id, {
       fileName: file.name,
       fileUrl: "/mock-docs/specification.pdf",
       fileSizeBytes: file.size,
       uploadedAt: new Date().toISOString(),
     });
     setUploadingSpec(false);
-    toast.success("Şartname yüklendi.");
+    toast.success(
+      `Şartname yüklendi. AI ${updated?.criteria?.length ?? 0} değerlendirme kriteri ve bir gönderim takvimi önerdi.`,
+    );
   }
 
   async function handleTemplateFile(file: File) {
@@ -484,6 +768,14 @@ export function CompetitionEditSheet({ competition }: { competition: Category })
         <Separator />
 
         <EvaluationDeadlineSection category={competition} />
+
+        <Separator />
+
+        <SubmissionWindowSection category={competition} />
+
+        <Separator />
+
+        <CriteriaSection category={competition} />
       </div>
     </>
   );

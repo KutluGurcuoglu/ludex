@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { useAppStore } from "@/store/useAppStore";
+import { getEffectiveCriteria, useAppStore } from "@/store/useAppStore";
 import * as evaluationsService from "@/services/evaluations.service";
 import { APPROVAL_STATUS_BADGE_CLASS, APPROVAL_STATUS_LABEL, STATUS_BADGE_CLASS, STATUS_LABEL, useViewMode } from "../_lib/shared";
 
@@ -20,7 +20,7 @@ export default function AdminJudgesPage() {
   const users = useAppStore((s) => s.users);
   const reports = useAppStore((s) => s.reports);
   const evaluations = useAppStore((s) => s.evaluations);
-  const scoreCriteria = useAppStore((s) => s.scoreCriteria);
+  const globalScoreCriteria = useAppStore((s) => s.scoreCriteria);
   const { viewMode } = useViewMode();
 
   const judges = useMemo(() => users.filter((u) => u.role === "judge"), [users]);
@@ -45,11 +45,6 @@ export default function AdminJudgesPage() {
         j.phone.replace(/\s/g, "").includes(q.replace(/\s/g, "")),
     );
   }, [judges, judgeSearch]);
-
-  const maxTotalScore = useMemo(
-    () => scoreCriteria.reduce((sum, c) => sum + c.maxScore, 0),
-    [scoreCriteria],
-  );
 
   const selectedJudge = judges.find((j) => j.id === selectedJudgeId) ?? null;
   const selectedJudgeReports = selectedJudge
@@ -230,7 +225,11 @@ export default function AdminJudgesPage() {
                     <p className="text-sm text-muted-foreground">Henüz tamamlanmış bir değerlendirme yok.</p>
                   ) : (
                     <div className="space-y-3">
-                      {selectedJudgeCompletedEvaluations.map(({ report, evaluation }) => (
+                      {selectedJudgeCompletedEvaluations.map(({ report, evaluation }) => {
+                        const reportCategory = categories.find((c) => c.id === report.categoryId) ?? null;
+                        const criteria = getEffectiveCriteria(reportCategory, globalScoreCriteria);
+                        const maxTotalScore = criteria.reduce((sum, c) => sum + c.maxScore, 0);
+                        return (
                         <div key={report.id} className="space-y-2 rounded-lg border border-border p-3">
                           <div className="flex items-center justify-between gap-2">
                             <p className="truncate text-base font-medium">{report.title}</p>
@@ -239,7 +238,7 @@ export default function AdminJudgesPage() {
                             </span>
                           </div>
                           <div className="space-y-1">
-                            {scoreCriteria.map((criterion) => {
+                            {criteria.map((criterion) => {
                               const cs = evaluation.criteriaScores.find(
                                 (x) => x.criterionId === criterion.id,
                               );
@@ -288,7 +287,8 @@ export default function AdminJudgesPage() {
                             )}
                           </div>
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>

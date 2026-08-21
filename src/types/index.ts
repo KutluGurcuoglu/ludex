@@ -30,6 +30,13 @@ export interface Category {
   resultsReleasedAt?: string | null;
   /** Hakemlerin bu kategorideki atanmış raporları değerlendirmeyi bitirmesi gereken son tarih. */
   evaluationDeadline?: string | null;
+  /** Bu kategoriye özel değerlendirme kriterleri; şartname yüklendiğinde AI tarafından
+   * otomatik oluşturulur, admin düzenleyebilir. Boşsa global scoreCriteria kullanılır. */
+  criteria?: ScoreCriterion[];
+  /** Yarışmacıların bu kategoriye rapor gönderebileceği tarih aralığı; şartname yüklendiğinde
+   * AI tarafından önerilir, admin değiştirebilir/uzatabilir. İkisi de boşsa gönderim her zaman açıktır. */
+  submissionOpensAt?: string | null;
+  submissionClosesAt?: string | null;
 }
 
 export interface User {
