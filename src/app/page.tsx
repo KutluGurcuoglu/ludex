@@ -171,12 +171,11 @@ export default function LandingPage() {
                 transition={{ ...SPRING, delay: 0.05 }}
                 className="text-4xl font-extrabold tracking-[-0.03em] sm:text-5xl md:text-6xl"
               >
-                Bir raporu okumak
+                Rapor başına saatler harcamak yerine,
                 <br />
-                saatler sürer.{" "}
-                <span className="text-brand-gradient">Kritik noktayı görmek</span>
+                <span className="text-brand-gradient">şartnameye uygunluğu, özgünlüğü ve riski</span>
                 <br />
-                saniyeler sürmeli.
+                tek bakışta gör.
               </motion.h1>
 
               <motion.p
