@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import { useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import { toast } from "sonner";
 import { Gavel, Laptop, Loader2, Moon, ShieldAlert, Sun } from "lucide-react";
@@ -22,7 +23,13 @@ import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { useAppStore, useCurrentUser } from "@/store/useAppStore";
 import * as usersService from "@/services/users.service";
-import type { JudgeApprovalStatus, JudgeWorkStatus } from "@/types";
+import type { JudgeApprovalStatus, JudgeWorkStatus, UserRole } from "@/types";
+
+const DASHBOARD_PATH: Record<UserRole, string> = {
+  admin: "/admin",
+  judge: "/judge",
+  contestant: "/contestant",
+};
 
 const WORK_STATUS_LABEL: Record<JudgeWorkStatus, string> = {
   working: "Çalışıyor",
@@ -316,6 +323,7 @@ export default function SettingsPage() {
 
 function SettingsView() {
   const user = useCurrentUser();
+  const router = useRouter();
 
   if (!user) return null;
 
@@ -324,11 +332,20 @@ function SettingsView() {
       <AppHeader subtitle="Ayarlar" />
       <div className="min-h-[calc(100vh-4rem)]">
         <main className="mx-auto w-full max-w-2xl space-y-6 px-6 py-10 md:px-12">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">Ayarlar</h1>
-            <p className="mt-1 text-base leading-relaxed text-muted-foreground">
-              Görünüm, bildirim ve hesap güvenliği tercihlerini buradan yönet.
-            </p>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight">Ayarlar</h1>
+              <p className="mt-1 text-base leading-relaxed text-muted-foreground">
+                Görünüm, bildirim ve hesap güvenliği tercihlerini buradan yönet.
+              </p>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => router.push(DASHBOARD_PATH[user.role])}
+            >
+              ← Panele Dön
+            </Button>
           </div>
 
           <AppearanceSection />
