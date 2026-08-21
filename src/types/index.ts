@@ -23,6 +23,20 @@ export interface Category {
   specification?: CompetitionDocument;
   reportTemplate?: CompetitionDocument;
   createdAt: string;
+  /** Admin bu kategori için bir sonuç yayın tarihi planladıysa; geçince tüm onaylı
+   * değerlendirmeler toplu olarak yarışmacılara açılır. */
+  resultsReleaseAt?: string | null;
+  /** Bu kategoride en son toplu yayının gerçekleştiği an (bilgi amaçlı). */
+  resultsReleasedAt?: string | null;
+  /** Hakemlerin bu kategorideki atanmış raporları değerlendirmeyi bitirmesi gereken son tarih. */
+  evaluationDeadline?: string | null;
+  /** Bu kategoriye özel değerlendirme kriterleri; şartname yüklendiğinde AI tarafından
+   * otomatik oluşturulur, admin düzenleyebilir. Boşsa global scoreCriteria kullanılır. */
+  criteria?: ScoreCriterion[];
+  /** Yarışmacıların bu kategoriye rapor gönderebileceği tarih aralığı; şartname yüklendiğinde
+   * AI tarafından önerilir, admin değiştirebilir/uzatabilir. İkisi de boşsa gönderim her zaman açıktır. */
+  submissionOpensAt?: string | null;
+  submissionClosesAt?: string | null;
 }
 
 export interface User {
@@ -35,6 +49,8 @@ export interface User {
   /** contestant: tek kategori (ilk eleman) · judge: uzmanlık alanları (çoklu) */
   categoryIds: string[];
   createdAt: string;
+  /** E-posta doğrulaması tamamlandığında set edilir; kayıt zorunlu olarak bunu bekler. */
+  emailVerifiedAt?: string | null;
 
   // Kişisel bilgiler
   isTurkishCitizen?: boolean;
@@ -64,10 +80,32 @@ export interface User {
   // Hakem başvuru/onay bilgileri
   judgeApprovalStatus?: JudgeApprovalStatus;
   judgeWorkStatus?: JudgeWorkStatus;
+  /** Bölüm / uzmanlık dalı (Örn: Bilgisayar Mühendisliği) — jobTitle/department'tan ayrı. */
+  expertiseArea?: string;
+  /** LinkedIn profili veya akademik özgeçmiş (YÖK Akademik / Google Scholar) linki. */
+  academicProfileUrl?: string;
+  /** Başvuruda yüklenen CV dosyasının adı (demo amaçlı; dosya içeriği saklanmaz). */
+  cvFileName?: string;
+  /** Sabit kategori listesinde olmayan, kullanıcının kendi eklediği uzmanlık etiketleri. */
+  customExpertiseTags?: string[];
+  /** KVKK Aydınlatma Metni ve Hakemlik Sözleşmesi'nin onaylandığı zaman. */
+  judgeAgreementAcceptedAt?: string;
 
-  // Bildirim tercihleri (varsayılan: açık)
+  // Bildirim tercihleri (varsayılan: açık) — role göre farklı alt kümesi kullanılır.
+  /** Hakem: kendisine yeni bir rapor atandığında. */
   notifyReportAssigned?: boolean;
+  /** Yarışmacı: raporu değerlendirilip yayınlandığında. */
   notifyEvaluationUpdates?: boolean;
+  /** Hakem: gönderdiği bir değerlendirme admin tarafından onaylanıp yayınlandığında. */
+  notifyEvaluationApproved?: boolean;
+  /** Admin: yeni bir hakem başvurusu geldiğinde. */
+  notifyNewJudgeApplication?: boolean;
+  /** Admin: yeni bir rapor havuza düştüğünde. */
+  notifyNewReportSubmission?: boolean;
+  /** Admin: bir hakem elenme önerisinde bulunduğunda. */
+  notifyDisqualificationFlag?: boolean;
+  /** Admin: bir hakem/yarışmacı destek talebi gönderdiğinde. */
+  notifySupportRequest?: boolean;
   notifyProductUpdates?: boolean;
 }
 
@@ -75,7 +113,8 @@ export type ReportStatus =
   | "pending_assignment" // Gönderildi, admin havuzunda bekliyor
   | "assigned" // Hakeme atandı, hakem henüz açmadı
   | "in_review" // Hakem değerlendirmeye başladı
-  | "completed"; // Hakem puanlamayı tamamladı
+  | "completed" // Hakem puanlamayı tamamladı
+  | "disqualified"; // Hakemin elenme önerisi admin tarafından onaylandı
 
 export interface Report {
   id: string;
@@ -87,8 +126,11 @@ export interface Report {
   fileSizeBytes: number;
   pdfUrl: string;
   status: ReportStatus;
-  assignedJudgeId?: string;
+  /** Birden fazla hakem atanabilir; puanlar ortalanır, büyük sapmalarda admin uyarılır. */
+  assignedJudgeIds: string[];
   assignedAt?: string;
+  /** Hakem raporu ilk kez "İncelemede" durumuna aldığında damgalanır — zaman çizelgesi için. */
+  reviewStartedAt?: string;
   submittedAt: string;
 }
 
@@ -219,8 +261,11 @@ export interface DisqualificationRecommendation {
   findingId: string;
   ruleText: string;
   findingText: string;
-  evidenceId: string;
+  evidenceId: string | null;
   decidedAt: string;
+  /** Admin'in hakemin elenme önerisi hakkındaki nihai kararı; admin henüz karar vermediyse boş. */
+  adminDecision?: "upheld" | "dismissed";
+  adminDecidedAt?: string;
 }
 
 export interface JudgeEvaluation {
@@ -232,7 +277,55 @@ export interface JudgeEvaluation {
   overallComment: string;
   status: EvaluationStatus;
   disqualificationRecommendation?: DisqualificationRecommendation | null;
+  /** Admin bu değerlendirmeyi onaylayıp (tek tek ya da kategori yayınıyla toplu) yarışmacıya
+   * açtıysa true olur. Hakem gönderdiği anda otomatik açılmaz — admin kapısından geçer. */
+  visibleToContestant?: boolean;
   updatedAt: string;
+}
+
+export type NotificationKind =
+  | "report_assigned"
+  | "evaluation_completed"
+  | "evaluation_approved"
+  | "report_disqualified"
+  | "judge_application_reviewed"
+  | "new_judge_application"
+  | "new_report_submission"
+  | "disqualification_flag"
+  | "support_request"
+  | "announcement";
+
+export interface AppNotification {
+  id: string;
+  userId: string;
+  kind: NotificationKind;
+  title: string;
+  body?: string;
+  link?: string;
+  createdAt: string;
+  readAt: string | null;
+  /** Demo amaçlı: gerçek bir e-posta servisi yok, sadece "bu da e-posta olarak gitti" işareti. */
+  channel?: "in_app" | "in_app_and_email";
+}
+
+/** Hakem/yarışmacı SSS'de çözüm bulamayınca admin'e gönderdiği destek talebi. */
+export interface SupportMessage {
+  id: string;
+  userId: string;
+  userName: string;
+  userRole: UserRole;
+  subject: string;
+  message: string;
+  createdAt: string;
+  resolvedAt?: string | null;
+}
+
+/** Admin tarafından yönetilen, hakem/yarışmacı ayarlar sayfasında gösterilen SSS girdisi. */
+export interface FaqEntry {
+  id: string;
+  role: "judge" | "contestant";
+  question: string;
+  answer: string;
 }
 
 export interface CopilotChatMessage {

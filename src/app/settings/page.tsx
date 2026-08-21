@@ -1,12 +1,29 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import { useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import { toast } from "sonner";
-import { Gavel, Laptop, Loader2, Moon, ShieldAlert, Sun } from "lucide-react";
+import {
+  Gavel,
+  HelpCircle,
+  Laptop,
+  LifeBuoy,
+  Loader2,
+  Mail,
+  Moon,
+  ShieldAlert,
+  Sun,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { RouteGuard } from "@/components/auth/route-guard";
 import { AppHeader } from "@/components/layout/app-header";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
 import {
   Card,
   CardContent,
@@ -16,13 +33,21 @@ import {
 } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { useAppStore, useCurrentUser } from "@/store/useAppStore";
 import * as usersService from "@/services/users.service";
-import type { JudgeApprovalStatus, JudgeWorkStatus } from "@/types";
+import * as supportService from "@/services/support.service";
+import type { JudgeApprovalStatus, JudgeWorkStatus, User, UserRole } from "@/types";
+
+const DASHBOARD_PATH: Record<UserRole, string> = {
+  admin: "/admin",
+  judge: "/judge",
+  contestant: "/contestant",
+};
 
 const WORK_STATUS_LABEL: Record<JudgeWorkStatus, string> = {
   working: "Çalışıyor",
@@ -92,66 +117,198 @@ function AppearanceSection() {
   );
 }
 
-function NotificationsSection({
-  userId,
-  notifyReportAssigned,
-  notifyEvaluationUpdates,
-  notifyProductUpdates,
-}: {
-  userId: string;
-  notifyReportAssigned: boolean;
-  notifyEvaluationUpdates: boolean;
-  notifyProductUpdates: boolean;
-}) {
-  async function toggle(field: "notifyReportAssigned" | "notifyEvaluationUpdates" | "notifyProductUpdates", value: boolean) {
-    await usersService.updateProfile(userId, { [field]: value });
+type NotifyField =
+  | "notifyReportAssigned"
+  | "notifyEvaluationUpdates"
+  | "notifyEvaluationApproved"
+  | "notifyNewJudgeApplication"
+  | "notifyNewReportSubmission"
+  | "notifyDisqualificationFlag"
+  | "notifySupportRequest"
+  | "notifyProductUpdates";
+
+interface NotifyRow {
+  field: NotifyField;
+  label: string;
+  description: string;
+}
+
+/** Bildirim tercihleri role göre tamamen farklıdır — bir yarışmacının "hakem başvurusu"
+ * ya da bir admin'in "rapor atandı" tercihi görmesinin anlamı yok. */
+const NOTIFY_ROWS_BY_ROLE: Record<UserRole, NotifyRow[]> = {
+  admin: [
+    {
+      field: "notifyNewJudgeApplication",
+      label: "Yeni hakem başvurusu",
+      description: "Biri hakem olmak için başvurduğunda bildirim al.",
+    },
+    {
+      field: "notifyNewReportSubmission",
+      label: "Yeni rapor gönderimi",
+      description: "Bir yarışmacı rapor gönderdiğinde bildirim al.",
+    },
+    {
+      field: "notifyDisqualificationFlag",
+      label: "Elenme önerisi",
+      description: "Bir hakem elenme önerisinde bulunduğunda bildirim al.",
+    },
+    {
+      field: "notifySupportRequest",
+      label: "Destek talepleri",
+      description: "Bir hakem veya yarışmacı yardım istediğinde bildirim al.",
+    },
+  ],
+  judge: [
+    {
+      field: "notifyReportAssigned",
+      label: "Rapor ataması",
+      description: "Sana yeni bir rapor atandığında bildirim al.",
+    },
+    {
+      field: "notifyEvaluationApproved",
+      label: "Değerlendirme onayı",
+      description: "Gönderdiğin bir değerlendirme admin tarafından yayınlandığında bildirim al.",
+    },
+  ],
+  contestant: [
+    {
+      field: "notifyEvaluationUpdates",
+      label: "Değerlendirme sonucu",
+      description: "Raporun değerlendirilip yayınlandığında bildirim al.",
+    },
+  ],
+};
+
+function NotificationsSection({ user }: { user: User }) {
+  async function toggle(field: NotifyField, value: boolean) {
+    await usersService.updateProfile(user.id, { [field]: value });
   }
+
+  const rows: NotifyRow[] = [
+    ...NOTIFY_ROWS_BY_ROLE[user.role],
+    {
+      field: "notifyProductUpdates",
+      label: "Ürün güncellemeleri",
+      description: "Ludex'teki yeni özellikler hakkında ara sıra bildirim al.",
+    },
+  ];
 
   return (
     <Card>
       <CardHeader>
         <CardTitle>Bildirimler</CardTitle>
-        <CardDescription>Hangi durumlarda e-posta bildirimi almak istediğini seç.</CardDescription>
+        <CardDescription>Hangi durumlarda bildirim almak istediğini seç.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <p className="text-base font-medium">Rapor ataması</p>
-            <p className="text-sm text-muted-foreground">
-              Sana yeni bir rapor atandığında bildirim al.
-            </p>
+        {rows.map((row, i) => (
+          <div key={row.field}>
+            {i > 0 && <Separator className="mb-4" />}
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <p className="text-base font-medium">{row.label}</p>
+                <p className="text-sm text-muted-foreground">{row.description}</p>
+              </div>
+              <Switch
+                checked={(user[row.field] as boolean | undefined) ?? true}
+                onCheckedChange={(v) => toggle(row.field, v)}
+              />
+            </div>
           </div>
-          <Switch
-            checked={notifyReportAssigned}
-            onCheckedChange={(v) => toggle("notifyReportAssigned", v)}
-          />
-        </div>
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
+function FaqSupportSection({ user }: { user: User }) {
+  const role = user.role as "judge" | "contestant";
+  const faqs = useAppStore((s) => s.faqs).filter((f) => f.role === role);
+  const [subject, setSubject] = useState("");
+  const [message, setMessage] = useState("");
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (!subject.trim() || !message.trim()) return;
+    setSending(true);
+    await supportService.sendSupportMessage(user.id, subject.trim(), message.trim());
+    setSending(false);
+    setSent(true);
+    setSubject("");
+    setMessage("");
+    toast.success("Destek talebin admin'e iletildi.");
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <HelpCircle className="size-4" />
+          Sık Sorulan Sorular
+        </CardTitle>
+        <CardDescription>Sorunun cevabı burada yoksa aşağıdan admin&apos;e ulaşabilirsin.</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {faqs.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Henüz bir SSS eklenmemiş.</p>
+        ) : (
+          <Accordion type="single" collapsible>
+            {faqs.map((item) => (
+              <AccordionItem key={item.id} value={item.id}>
+                <AccordionTrigger className="text-left text-base">{item.question}</AccordionTrigger>
+                <AccordionContent className="text-base text-muted-foreground">
+                  {item.answer}
+                </AccordionContent>
+              </AccordionItem>
+            ))}
+          </Accordion>
+        )}
+
         <Separator />
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <p className="text-base font-medium">Değerlendirme güncellemeleri</p>
-            <p className="text-sm text-muted-foreground">
-              Bir raporun durumu değiştiğinde bildirim al.
-            </p>
-          </div>
-          <Switch
-            checked={notifyEvaluationUpdates}
-            onCheckedChange={(v) => toggle("notifyEvaluationUpdates", v)}
-          />
+
+        <div className="space-y-1">
+          <p className="flex items-center gap-1.5 text-base font-medium">
+            <LifeBuoy className="size-4" />
+            Sorun çözülmedi mi?
+          </p>
+          <p className="text-sm text-muted-foreground">
+            Aşağıdaki formu doldur, doğrudan yönetime düşsün — kontrol edip sana dönecekler.
+          </p>
         </div>
-        <Separator />
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <p className="text-base font-medium">Ürün güncellemeleri</p>
-            <p className="text-sm text-muted-foreground">
-              Ludex&apos;teki yeni özellikler hakkında ara sıra e-posta al.
-            </p>
+
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <div className="space-y-1.5">
+            <Label htmlFor="support-subject">Konu</Label>
+            <Input
+              id="support-subject"
+              required
+              value={subject}
+              onChange={(e) => setSubject(e.target.value)}
+              placeholder="Örn: Rapor kategorisi yanlış atanmış"
+            />
           </div>
-          <Switch
-            checked={notifyProductUpdates}
-            onCheckedChange={(v) => toggle("notifyProductUpdates", v)}
-          />
-        </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="support-message">Mesaj</Label>
+            <Textarea
+              id="support-message"
+              required
+              rows={3}
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              placeholder="Yaşadığın sorunu kısaca anlat..."
+            />
+          </div>
+          <Button type="submit" disabled={sending} className="gap-1.5">
+            {sending ? <Loader2 className="size-4 animate-spin" /> : <Mail className="size-4" />}
+            {sending ? "Gönderiliyor..." : "Destek İste"}
+          </Button>
+          {sent && (
+            <p className="text-sm text-emerald-600 dark:text-emerald-400">
+              Talebin iletildi, admin en kısa sürede sana dönecek.
+            </p>
+          )}
+        </form>
       </CardContent>
     </Card>
   );
@@ -316,6 +473,7 @@ export default function SettingsPage() {
 
 function SettingsView() {
   const user = useCurrentUser();
+  const router = useRouter();
 
   if (!user) return null;
 
@@ -324,20 +482,24 @@ function SettingsView() {
       <AppHeader subtitle="Ayarlar" />
       <div className="min-h-[calc(100vh-4rem)]">
         <main className="mx-auto w-full max-w-2xl space-y-6 px-6 py-10 md:px-12">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">Ayarlar</h1>
-            <p className="mt-1 text-base leading-relaxed text-muted-foreground">
-              Görünüm, bildirim ve hesap güvenliği tercihlerini buradan yönet.
-            </p>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight">Ayarlar</h1>
+              <p className="mt-1 text-base leading-relaxed text-muted-foreground">
+                Görünüm, bildirim ve hesap güvenliği tercihlerini buradan yönet.
+              </p>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => router.push(DASHBOARD_PATH[user.role])}
+            >
+              ← Panele Dön
+            </Button>
           </div>
 
           <AppearanceSection />
-          <NotificationsSection
-            userId={user.id}
-            notifyReportAssigned={user.notifyReportAssigned ?? true}
-            notifyEvaluationUpdates={user.notifyEvaluationUpdates ?? true}
-            notifyProductUpdates={user.notifyProductUpdates ?? false}
-          />
+          <NotificationsSection user={user} />
           <SecuritySection userId={user.id} />
           {user.role === "judge" && (
             <JudgeStatusSection
@@ -345,6 +507,9 @@ function SettingsView() {
               workStatus={user.judgeWorkStatus}
               categoryIds={user.categoryIds}
             />
+          )}
+          {(user.role === "judge" || user.role === "contestant") && (
+            <FaqSupportSection user={user} />
           )}
         </main>
       </div>

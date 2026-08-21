@@ -1,5 +1,5 @@
 import { useAppStore, type AppState } from "@/store/useAppStore";
-import type { Report, ReportStatus } from "@/types";
+import type { Report } from "@/types";
 import { simulateNetworkDelay } from "./delay";
 
 export function getReports(): Promise<Report[]> {
@@ -16,7 +16,7 @@ export function assignReports(reportIds: string[], judgeId: string): Promise<voi
   return simulateNetworkDelay(undefined);
 }
 
-export function setReportStatus(reportId: string, status: ReportStatus): Promise<void> {
-  useAppStore.getState().setReportStatus(reportId, status);
+export function unassignJudge(reportId: string, judgeId: string): Promise<void> {
+  useAppStore.getState().unassignJudge(reportId, judgeId);
   return simulateNetworkDelay(undefined);
 }

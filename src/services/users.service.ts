@@ -29,12 +29,12 @@ export function deleteAccount(userId: string): Promise<void> {
   return simulateNetworkDelay(undefined);
 }
 
-export function changePassword(
+export async function changePassword(
   userId: string,
   currentPassword: string,
   newPassword: string,
 ): Promise<{ success: boolean; error?: string }> {
-  const result = useAppStore.getState().changePassword(userId, currentPassword, newPassword);
+  const result = await useAppStore.getState().changePassword(userId, currentPassword, newPassword);
   return simulateNetworkDelay(result);
 }
 

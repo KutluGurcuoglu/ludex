@@ -3,7 +3,8 @@
 import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, FileText, Gavel, ShieldCheck, Sparkles } from "lucide-react";
+import { toast } from "sonner";
+import { ArrowLeft, FileText, Gavel, Loader2, ShieldCheck, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -30,6 +31,8 @@ export default function LoginPage() {
   const currentUser = useCurrentUser();
   const login = useAppStore((s) => s.login);
   const register = useAppStore((s) => s.register);
+  const verifyEmail = useAppStore((s) => s.verifyEmail);
+  const resendEmailVerification = useAppStore((s) => s.resendEmailVerification);
   const demoLogin = useAppStore((s) => s.demoLogin);
 
   useEffect(() => {
@@ -49,19 +52,63 @@ export default function LoginPage() {
   const [role, setRole] = useState<"contestant" | "judge">("contestant");
   const [registerError, setRegisterError] = useState<string | null>(null);
 
-  function handleLogin(e: FormEvent) {
+  const [awaitingVerification, setAwaitingVerification] = useState(false);
+  const [verifyCode, setVerifyCode] = useState("");
+  const [verifyError, setVerifyError] = useState<string | null>(null);
+  const [verifySubmitting, setVerifySubmitting] = useState(false);
+  const [resending, setResending] = useState(false);
+
+  async function handleLogin(e: FormEvent) {
     e.preventDefault();
     setLoginError(null);
-    const result = login(loginEmail, loginPassword);
-    if (!result.success) setLoginError(result.error ?? "Giriş başarısız.");
+    const result = await login(loginEmail, loginPassword);
+    if (!result.success) {
+      setLoginError(result.error ?? "Giriş başarısız.");
+      if (result.requiresVerification) {
+        if (result.code) toast.info(`Demo doğrulama kodu: ${result.code}`);
+        setAwaitingVerification(true);
+      }
+    }
   }
 
-  function handleRegister(e: FormEvent) {
+  async function handleRegister(e: FormEvent) {
     e.preventDefault();
     setRegisterError(null);
 
-    const result = register({ name, email, phone, password, role });
-    if (!result.success) setRegisterError(result.error ?? "Kayıt başarısız.");
+    const result = await register({ name, email, phone, password, role });
+    if (!result.success) {
+      setRegisterError(result.error ?? "Kayıt başarısız.");
+      return;
+    }
+    if (result.code) {
+      toast.info(`Demo doğrulama kodu: ${result.code}`, {
+        description: "Gerçek sistemde bu kod e-postana gönderilir.",
+      });
+    }
+    setAwaitingVerification(true);
+  }
+
+  async function handleVerify(e: FormEvent) {
+    e.preventDefault();
+    setVerifyError(null);
+    setVerifySubmitting(true);
+    const result = await verifyEmail(verifyCode);
+    setVerifySubmitting(false);
+    if (!result.success) {
+      setVerifyError(result.error ?? "Doğrulama başarısız.");
+      return;
+    }
+  }
+
+  async function handleResendVerification() {
+    setResending(true);
+    const result = await resendEmailVerification();
+    setResending(false);
+    if (result.success && result.code) {
+      toast.info(`Demo doğrulama kodu: ${result.code}`);
+    } else if (!result.success) {
+      toast.error(result.error ?? "Kod tekrar gönderilemedi.");
+    }
   }
 
   if (!hydrated || currentUser) {
@@ -99,7 +146,66 @@ export default function LoginPage() {
 
         <Card className="border-border/60 bg-card/80 shadow-xl backdrop-blur-sm">
           <CardContent className="pt-6">
-            <Tabs defaultValue="login">
+            {awaitingVerification ? (
+              <div className="space-y-4">
+                <div className="space-y-1.5 text-center">
+                  <p className="text-lg font-semibold">E-postanı Doğrula</p>
+                  <p className="text-sm text-muted-foreground">
+                    E-posta adresine gönderilen 6 haneli doğrulama kodunu gir. Bu adım tüm yeni
+                    kayıtlar için zorunludur.
+                  </p>
+                </div>
+                <form onSubmit={handleVerify} className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="verify-code">Doğrulama Kodu</Label>
+                    <Input
+                      id="verify-code"
+                      required
+                      inputMode="numeric"
+                      maxLength={6}
+                      value={verifyCode}
+                      onChange={(e) => setVerifyCode(e.target.value)}
+                      placeholder="123456"
+                    />
+                  </div>
+
+                  {verifyError && (
+                    <Alert variant="destructive">
+                      <AlertDescription>{verifyError}</AlertDescription>
+                    </Alert>
+                  )}
+
+                  <Button
+                    type="submit"
+                    disabled={verifySubmitting}
+                    className="w-full gap-1.5 transition-transform active:scale-[0.98]"
+                  >
+                    {verifySubmitting && <Loader2 className="size-4 animate-spin" />}
+                    {verifySubmitting ? "Doğrulanıyor..." : "Doğrula ve Devam Et"}
+                  </Button>
+
+                  <div className="flex items-center justify-between text-sm">
+                    <button
+                      type="button"
+                      className="text-muted-foreground underline-offset-4 hover:underline"
+                      onClick={() => setAwaitingVerification(false)}
+                    >
+                      Geri dön
+                    </button>
+                    <button
+                      type="button"
+                      disabled={resending}
+                      className="font-medium text-primary underline-offset-4 hover:underline disabled:opacity-60"
+                      onClick={handleResendVerification}
+                    >
+                      {resending ? "Gönderiliyor..." : "Kodu tekrar gönder"}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            ) : (
+              <>
+                <Tabs defaultValue="login">
               <TabsList className="grid w-full grid-cols-2">
                 <TabsTrigger value="login">Giriş Yap</TabsTrigger>
                 <TabsTrigger value="register">Kayıt Ol</TabsTrigger>
@@ -275,6 +381,8 @@ export default function LoginPage() {
                 </Button>
               </div>
             </div>
+              </>
+            )}
           </CardContent>
         </Card>
       </div>

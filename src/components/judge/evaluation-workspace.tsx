@@ -63,11 +63,12 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
-import { useAppStore, useCurrentUser } from "@/store/useAppStore";
+import { getEffectiveCriteria, useAppStore, useCurrentUser } from "@/store/useAppStore";
 import * as reportsService from "@/services/reports.service";
 import * as evaluationsService from "@/services/evaluations.service";
 import * as aiAnalysisService from "@/services/ai-analysis.service";
 import { simulateNetworkDelay } from "@/services/delay";
+import { buildHighlightQuery, highlightTextItem } from "@/lib/pdf-highlight";
 import type {
   AIAnalysisResult,
   ComplianceCheckItem,
@@ -227,13 +228,72 @@ const ANALYSIS_STEPS = [
   "AI yazım riski değerlendiriliyor...",
 ];
 
+type GateFindingKind = "critical" | "language" | "spec";
+
+interface GateFinding {
+  id: string;
+  kind: GateFindingKind;
+  title: string;
+  ruleText: string;
+  findingText: string;
+  probability: Severity;
+  evidenceId: string | null;
+}
+
+/**
+ * Hakemin karar vermeden geçemeyeceği tüm bulgular: kritik şartname bulguları,
+ * dil denetimi başarısızlığı ve genel şartname (specCompliance) ihlalleri.
+ */
+function buildGateFindings(analysis: AIAnalysisResult): GateFinding[] {
+  const findings: GateFinding[] = analysis.criticalFindings.map((f) => ({
+    id: f.id,
+    kind: "critical",
+    title: "KRİTİK ŞARTNAME BULGUSU",
+    ruleText: f.ruleText,
+    findingText: f.findingText,
+    probability: f.probability,
+    evidenceId: f.evidenceId,
+  }));
+
+  if (!analysis.languageCheck.passed) {
+    findings.push({
+      id: "language-check",
+      kind: "language",
+      title: "DİL DENETİMİ UYARISI",
+      ruleText: `Rapor, şartnamede belirtilen ${analysis.languageCheck.expectedLanguage} dilinde yazılmalıdır.`,
+      findingText: `Tespit edilen dil: ${analysis.languageCheck.detectedLanguage} (güven: %${analysis.languageCheck.confidence})`,
+      probability: analysis.languageCheck.confidence >= 80 ? "high" : "medium",
+      evidenceId: null,
+    });
+  }
+
+  analysis.specCompliance
+    .filter((item) => !item.passed)
+    .forEach((item) => {
+      findings.push({
+        id: item.id,
+        kind: "spec",
+        title: "ŞARTNAMEYE AYKIRI DURUM",
+        ruleText: item.label,
+        findingText: item.detail,
+        probability: "medium",
+        evidenceId: item.evidenceIds[0] ?? null,
+      });
+    });
+
+  return findings;
+}
+
 export function EvaluationWorkspace({ reportId }: { reportId: string }) {
   const router = useRouter();
   const user = useCurrentUser();
   const report = useAppStore((s) => s.reports.find((r) => r.id === reportId)) ?? null;
   const categories = useAppStore((s) => s.categories);
-  const scoreCriteria = useAppStore((s) => s.scoreCriteria);
+  const globalScoreCriteria = useAppStore((s) => s.scoreCriteria);
   const evaluations = useAppStore((s) => s.evaluations);
+
+  const category = categories.find((c) => c.id === report?.categoryId) ?? null;
+  const scoreCriteria = getEffectiveCriteria(category, globalScoreCriteria);
 
   const [isLoading, setIsLoading] = useState(true);
   const [analysisState, setAnalysisState] = useState<AnalysisState>("idle");
@@ -262,7 +322,7 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
     null,
   );
   const [pendingDecision, setPendingDecision] = useState<{
-    finding: AIAnalysisResult["criticalFindings"][number];
+    finding: GateFinding;
     decision: "flagged" | "dismissed";
   } | null>(null);
 
@@ -323,6 +383,11 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
   const scoreDiff =
     analysis?.suggestedScore != null ? totalScore - analysis.suggestedScore : null;
 
+  const gateFindings = useMemo(
+    () => (analysis ? buildGateFindings(analysis) : []),
+    [analysis],
+  );
+
   const languageComplianceItem: ComplianceCheckItem | null = analysis
     ? {
         id: "language-check",
@@ -370,7 +435,7 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
     const result = await aiAnalysisService.getAIAnalysis(reportId);
     setAnalysis(result);
 
-    if (result && result.criticalFindings.length > 0) {
+    if (result && buildGateFindings(result).length > 0) {
       setAnalysisState("awaiting-decision");
       return;
     }
@@ -380,11 +445,10 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
 
   useEffect(() => {
     if (analysisState !== "awaiting-decision" || !analysis) return;
-    const findings = analysis.criticalFindings;
-    const allDecided = findings.every((f) => findingDecisions[f.id]);
+    const allDecided = gateFindings.every((f) => findingDecisions[f.id]);
     if (!allDecided) return;
 
-    const anyFlagged = findings.some((f) => findingDecisions[f.id] === "flagged");
+    const anyFlagged = gateFindings.some((f) => findingDecisions[f.id] === "flagged");
     if (anyFlagged) {
       setAnalysisState("eliminated");
       toast.warning(
@@ -394,7 +458,31 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
       runRemainingSteps();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [analysisState, analysis, findingDecisions]);
+  }, [analysisState, analysis, findingDecisions, gateFindings]);
+
+  useEffect(() => {
+    if (isLoading || existingEvaluation?.status !== "submitted") return;
+    if (analysisState !== "idle" || analysis) return;
+
+    let active = true;
+    Promise.resolve()
+      .then(() => {
+        if (active) setAnalysisState("checking");
+      })
+      .then(() => aiAnalysisService.getAIAnalysis(reportId))
+      .then((result) => {
+        if (!active) return;
+        if (result) {
+          setAnalysis(result);
+          setAnalysisState("done");
+        } else {
+          setAnalysisState("idle");
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [isLoading, existingEvaluation, analysisState, analysis, reportId]);
 
   function jumpToEvidence(evidenceId: string) {
     const evidence = analysis?.evidences.find((e) => e.id === evidenceId);
@@ -403,10 +491,13 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
     setFocusedEvidenceId(evidenceId);
   }
 
-  function requestFindingDecision(
-    finding: AIAnalysisResult["criticalFindings"][number],
-    decision: "flagged" | "dismissed",
-  ) {
+  const highlightQuery = useMemo(() => {
+    if (!focusedEvidenceId || !analysis) return null;
+    const evidence = analysis.evidences.find((e) => e.id === focusedEvidenceId);
+    return evidence ? buildHighlightQuery(evidence.excerpt) : null;
+  }, [focusedEvidenceId, analysis]);
+
+  function requestFindingDecision(finding: GateFinding, decision: "flagged" | "dismissed") {
     setPendingDecision({ finding, decision });
   }
 
@@ -470,7 +561,12 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
 
     setMessages((prev) => [
       ...prev,
-      { id: `msg-${Date.now()}`, role: "user", content: text, createdAt: new Date().toISOString() },
+      {
+        id: `msg-${crypto.randomUUID()}`,
+        role: "user",
+        content: text,
+        createdAt: new Date().toISOString(),
+      },
     ]);
     setChatInput("");
     setChatSending(true);
@@ -480,7 +576,7 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
     setMessages((prev) => [
       ...prev,
       {
-        id: `msg-${Date.now()}-r`,
+        id: `msg-${crypto.randomUUID()}`,
         role: "assistant",
         content: reply,
         createdAt: new Date().toISOString(),
@@ -504,8 +600,6 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
       </>
     );
   }
-
-  const category = categories.find((c) => c.id === report.categoryId);
 
   return (
     <>
@@ -563,7 +657,12 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
                   }
                   className="mx-auto flex justify-center"
                 >
-                  <Page pageNumber={pageNumber} width={420} renderAnnotationLayer={false} />
+                  <Page
+                    pageNumber={pageNumber}
+                    width={420}
+                    renderAnnotationLayer={false}
+                    customTextRenderer={({ str }) => highlightTextItem(str, highlightQuery)}
+                  />
                 </Document>
               </div>
             </Card>
@@ -619,7 +718,7 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
                   </Card>
                 )}
 
-                {analysis && analysis.criticalFindings.length > 0 && (
+                {analysis && gateFindings.length > 0 && (
                   <div className="animate-in fade-in-0 slide-in-from-bottom-2 space-y-4 duration-500">
                     {languageComplianceItem && (
                       <Card>
@@ -635,8 +734,8 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
 
                     {analysisState === "awaiting-decision" && (
                       <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-base text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300">
-                        Şartname denetimi tamamlandı. Kalan analiz aşamalarına geçmeden önce aşağıdaki
-                        kritik bulgu(lar) için karar ver.
+                        Şartname ve dil denetimi tamamlandı. Kalan analiz aşamalarına geçmeden önce
+                        aşağıdaki bulgu(lar) için karar ver.
                       </p>
                     )}
 
@@ -651,14 +750,15 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
                       </Alert>
                     )}
 
-                    {analysis.criticalFindings.map((finding) => {
+                    {gateFindings.map((finding) => {
                       const decision = findingDecisions[finding.id];
+                      const evidenceId = finding.evidenceId;
                       return (
                         <Card key={finding.id} className="border-red-300 dark:border-red-900">
                           <CardHeader>
                             <CardTitle className="flex items-center gap-2 text-base text-red-700 dark:text-red-400">
                               <AlertOctagon className="size-4" />
-                              KRİTİK ŞARTNAME BULGUSU
+                              {finding.title}
                             </CardTitle>
                           </CardHeader>
                           <CardContent className="space-y-3">
@@ -670,15 +770,17 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
                               <p className="text-base font-medium text-muted-foreground">Rapor bulgusu</p>
                               <p className="text-base">{finding.findingText}</p>
                             </div>
-                            <Button
-                              type="button"
-                              variant="link"
-                              size="sm"
-                              className="h-auto p-0 text-base"
-                              onClick={() => jumpToEvidence(finding.evidenceId)}
-                            >
-                              Kanıt: Rapor, Sayfa {analysis.evidences.find((e) => e.id === finding.evidenceId)?.page}
-                            </Button>
+                            {evidenceId && (
+                              <Button
+                                type="button"
+                                variant="link"
+                                size="sm"
+                                className="h-auto p-0 text-base"
+                                onClick={() => jumpToEvidence(evidenceId)}
+                              >
+                                Kanıt: Rapor, Sayfa {analysis.evidences.find((e) => e.id === evidenceId)?.page}
+                              </Button>
+                            )}
                             <div className="flex items-center justify-between rounded-lg bg-muted/50 px-3 py-2 text-base">
                               <span className="text-muted-foreground">AI değerlendirmesi</span>
                               <Badge variant="outline" className={SEVERITY_CLASS[finding.probability]}>

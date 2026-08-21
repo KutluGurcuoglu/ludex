@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { LogOut, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { NotificationBell } from "@/components/notification-bell";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   AlertDialog,
@@ -18,15 +19,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useAppStore, useCurrentUser } from "@/store/useAppStore";
-import type { UserRole } from "@/types";
 
-const ROLE_LABELS: Record<UserRole, string> = {
-  admin: "Yönetici",
-  judge: "Hakem",
-  contestant: "Yarışmacı",
-};
-
-export function AppHeader({ subtitle }: { subtitle?: string } = {}) {
+export function AppHeader({}: { subtitle?: string } = {}) {
   const user = useCurrentUser();
   const logout = useAppStore((s) => s.logout);
   const router = useRouter();
@@ -35,18 +29,17 @@ export function AppHeader({ subtitle }: { subtitle?: string } = {}) {
   if (!user) return null;
 
   return (
-    <header className="sticky top-0 z-40 bg-background/70 shadow-[0_8px_20px_-12px_rgba(0,0,0,0.12)] backdrop-blur-2xl">
+    <header className="glass-toolbar sticky top-0 z-40">
       <div className="flex h-16 w-full items-center justify-between px-6 md:px-12">
         <div className="flex flex-col items-start justify-center leading-tight">
           <span className="text-brand-gradient text-lg font-bold tracking-tight">
             Ludex
           </span>
-          <span className="text-sm text-muted-foreground">
-            {subtitle ?? `${ROLE_LABELS[user.role]} Paneli`}
-          </span>
+          <span className="text-sm text-muted-foreground">{user.name}</span>
         </div>
 
         <div className="ml-auto flex items-center gap-3">
+          <NotificationBell />
           <ThemeToggle />
           <Button asChild variant="ghost" size="icon" className="size-8" aria-label="Ayarlar">
             <Link href="/settings">
@@ -56,13 +49,13 @@ export function AppHeader({ subtitle }: { subtitle?: string } = {}) {
           <Link
             href="/profile"
             className="flex items-center gap-2 rounded-full transition-opacity hover:opacity-75"
+            aria-label="Profilim"
           >
             <Avatar className="size-8">
               <AvatarFallback className="text-sm">
                 {user.name.slice(0, 2).toUpperCase()}
               </AvatarFallback>
             </Avatar>
-            <span className="hidden text-base font-medium sm:inline">{user.name}</span>
           </Link>
           <Button
             variant="ghost"

@@ -4,22 +4,26 @@ import { useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent } 
 import Link from "next/link";
 import { toast } from "sonner";
 import {
-  AlertTriangle,
+  CalendarClock,
   CheckCircle2,
   Clock,
   FileText,
   LayoutDashboard,
-  Lightbulb,
   Loader2,
   Menu,
   Send,
   UploadCloud,
   User as UserIcon,
   X,
+  XCircle,
 } from "lucide-react";
+import { motion } from "motion/react";
 import { cn } from "@/lib/utils";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { RouteGuard } from "@/components/auth/route-guard";
 import { AppHeader } from "@/components/layout/app-header";
+import { ReportTimeline } from "@/components/report-timeline";
+import { aggregateEvaluations } from "@/lib/scoring";
 import {
   Card,
   CardContent,
@@ -32,7 +36,6 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select,
@@ -49,12 +52,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { useAppStore, useCurrentUser } from "@/store/useAppStore";
+import { getEffectiveCriteria, useAppStore, useCurrentUser } from "@/store/useAppStore";
 import * as reportsService from "@/services/reports.service";
 import * as categoriesService from "@/services/categories.service";
 import * as evaluationsService from "@/services/evaluations.service";
-import * as aiAnalysisService from "@/services/ai-analysis.service";
-import type { AIAnalysisResult, ReportStatus } from "@/types";
+import type { Category, ReportStatus } from "@/types";
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20 MB
 
@@ -63,6 +65,7 @@ const STATUS_LABEL: Record<ReportStatus, string> = {
   assigned: "Gönderildi",
   in_review: "Değerlendirmede",
   completed: "Tamamlandı",
+  disqualified: "Elendi",
 };
 
 const STATUS_BADGE_CLASS: Record<ReportStatus, string> = {
@@ -74,6 +77,8 @@ const STATUS_BADGE_CLASS: Record<ReportStatus, string> = {
     "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300",
   completed:
     "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300",
+  disqualified:
+    "border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300",
 };
 
 const STATUS_ICON: Record<ReportStatus, typeof Clock> = {
@@ -81,6 +86,7 @@ const STATUS_ICON: Record<ReportStatus, typeof Clock> = {
   assigned: Send,
   in_review: Clock,
   completed: CheckCircle2,
+  disqualified: XCircle,
 };
 
 type Section = "overview" | "submit" | "reports";
@@ -141,6 +147,26 @@ function formatDate(iso: string) {
   });
 }
 
+/** İkisi de boşsa gönderim her zaman açıktır — bkz. admin panelindeki gönderim takvimi. */
+function isSubmissionWindowOpen(category: Pick<Category, "submissionOpensAt" | "submissionClosesAt"> | null | undefined) {
+  if (!category) return true;
+  const now = Date.now();
+  if (category.submissionOpensAt && new Date(category.submissionOpensAt).getTime() > now) return false;
+  if (category.submissionClosesAt && new Date(category.submissionClosesAt).getTime() < now) return false;
+  return true;
+}
+
+function describeSubmissionWindow(category: Pick<Category, "submissionOpensAt" | "submissionClosesAt">) {
+  const now = Date.now();
+  if (category.submissionOpensAt && new Date(category.submissionOpensAt).getTime() > now) {
+    return `Gönderim ${formatDate(category.submissionOpensAt)} tarihinde açılacak.`;
+  }
+  if (category.submissionClosesAt && new Date(category.submissionClosesAt).getTime() < now) {
+    return `Gönderim ${formatDate(category.submissionClosesAt)} tarihinde kapandı.`;
+  }
+  return "Bu kategori için gönderim şu anda kapalı.";
+}
+
 function ContestantSkeleton() {
   return (
     <div className="mb-8">
@@ -189,7 +215,7 @@ function ContestantDashboard() {
   const categories = useAppStore((s) => s.categories);
   const reports = useAppStore((s) => s.reports);
   const evaluations = useAppStore((s) => s.evaluations);
-  const scoreCriteria = useAppStore((s) => s.scoreCriteria);
+  const globalScoreCriteria = useAppStore((s) => s.scoreCriteria);
 
   const [isLoading, setIsLoading] = useState(true);
   const [categoryId, setCategoryId] = useState("");
@@ -198,25 +224,11 @@ function ContestantDashboard() {
   const [isDragging, setIsDragging] = useState(false);
   const [fileError, setFileError] = useState<string | null>(null);
   const [detailReportId, setDetailReportId] = useState<string | null>(null);
-  const [detailAnalysis, setDetailAnalysis] = useState<AIAnalysisResult | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const [navOpen, setNavOpen] = useState(false);
   const [activeSection, setActiveSection] = useState<Section>("overview");
-
-  const loadingAnalysis = !!detailReportId && detailAnalysis?.reportId !== detailReportId;
-
-  useEffect(() => {
-    if (!detailReportId) return;
-    let active = true;
-    aiAnalysisService.getAIAnalysis(detailReportId).then((result) => {
-      if (active) setDetailAnalysis(result);
-    });
-    return () => {
-      active = false;
-    };
-  }, [detailReportId]);
 
   useEffect(() => {
     let active = true;
@@ -233,13 +245,35 @@ function ContestantDashboard() {
     };
   }, []);
 
+  const detailReport = reports.find((r) => r.id === detailReportId) ?? null;
+  const detailCategory = categories.find((c) => c.id === detailReport?.categoryId) ?? null;
+  const scoreCriteria = getEffectiveCriteria(detailCategory, globalScoreCriteria);
   const maxTotalScore = useMemo(
     () => scoreCriteria.reduce((sum, c) => sum + c.maxScore, 0),
     [scoreCriteria],
   );
 
-  const detailReport = reports.find((r) => r.id === detailReportId) ?? null;
-  const detailEvaluation = evaluations.find((e) => e.reportId === detailReportId) ?? null;
+  const detailReportEvaluations = useMemo(
+    () => evaluations.filter((e) => e.reportId === detailReportId),
+    [evaluations, detailReportId],
+  );
+  // Hakem bitirir bitirmez puan görünmez — admin tek tek onaylayana ya da kategori
+  // toplu yayınlanana kadar (visibleToContestant) yarışmacıya sadece "sonuç bekleniyor" gösterilir.
+  const detailAggregate = useMemo(
+    () =>
+      aggregateEvaluations(
+        detailReportEvaluations.filter((e) => e.visibleToContestant),
+        scoreCriteria,
+      ),
+    [detailReportEvaluations, scoreCriteria],
+  );
+  const detailDisqualification = detailReportEvaluations
+    .map((e) => e.disqualificationRecommendation)
+    .find((d) => d?.adminDecision === "upheld");
+  // Zaman çizelgesindeki "sonuç" adımı için en güncel değerlendirmeyi kullan.
+  const detailLatestEvaluation = [...detailReportEvaluations].sort(
+    (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+  )[0];
 
   const myReports = useMemo(
     () =>
@@ -288,7 +322,8 @@ function ContestantDashboard() {
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    if (!user || !categoryId || !title.trim() || !file) return;
+    const category = categories.find((c) => c.id === categoryId) ?? null;
+    if (!user || !categoryId || !title.trim() || !file || !isSubmissionWindowOpen(category)) return;
 
     setSubmitting(true);
     await reportsService.submitReport({
@@ -297,7 +332,9 @@ function ContestantDashboard() {
       title: title.trim(),
       fileName: file.name,
       fileSizeBytes: file.size,
-      pdfUrl: "/mock-pdfs/sample-report.pdf",
+      // Gerçek dosya içeriğini gösterir; bu blob URL sadece bu tarayıcı sekmesinde ve
+      // sayfa yenilenene kadar geçerlidir (backend'e taşınınca gerçek bir dosya URL'i olacak).
+      pdfUrl: URL.createObjectURL(file),
     });
     setSubmitting(false);
 
@@ -311,7 +348,9 @@ function ContestantDashboard() {
     setFileError(null);
   }
 
-  const canSubmit = Boolean(categoryId && title.trim() && file);
+  const selectedSubmitCategory = categories.find((c) => c.id === categoryId) ?? null;
+  const submissionOpen = isSubmissionWindowOpen(selectedSubmitCategory);
+  const canSubmit = Boolean(categoryId && title.trim() && file && submissionOpen);
 
   if (isLoading) {
     return (
@@ -330,7 +369,7 @@ function ContestantDashboard() {
     <>
       <AppHeader subtitle={SECTION_META[activeSection].label} />
       <div className="min-h-[calc(100vh-4rem)]">
-        <div className="sticky top-16 z-30 flex items-center justify-between border-b border-border/60 bg-background/80 px-6 py-3 backdrop-blur-md md:px-12">
+        <div className="glass-toolbar sticky top-16 z-30 flex items-center justify-between px-6 py-3 md:px-12">
           <Button variant="outline" size="icon" onClick={() => setNavOpen(true)}>
             <Menu className="size-4" />
           </Button>
@@ -405,8 +444,9 @@ function ContestantDashboard() {
                     </SelectTrigger>
                     <SelectContent>
                       {categories.map((c) => (
-                        <SelectItem key={c.id} value={c.id}>
+                        <SelectItem key={c.id} value={c.id} disabled={!isSubmissionWindowOpen(c)}>
                           {c.name}
+                          {!isSubmissionWindowOpen(c) && " (gönderim kapalı)"}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -436,9 +476,9 @@ function ContestantDashboard() {
                     onDragLeave={() => setIsDragging(false)}
                     onDrop={handleDrop}
                     onClick={() => inputRef.current?.click()}
-                    className={`flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-6 py-10 text-center transition-colors ${
+                    className={`flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-6 py-10 text-center transition-all duration-200 active:scale-[0.98] ${
                       isDragging
-                        ? "border-primary bg-primary/5"
+                        ? "scale-[1.01] border-primary bg-primary/5"
                         : "border-border hover:border-primary/50"
                     }`}
                   >
@@ -485,6 +525,13 @@ function ContestantDashboard() {
                 {fileError && <p className="text-sm font-medium text-destructive">{fileError}</p>}
               </div>
 
+              {selectedSubmitCategory && !submissionOpen && (
+                <Alert variant="destructive">
+                  <CalendarClock className="size-4" />
+                  <AlertDescription>{describeSubmissionWindow(selectedSubmitCategory)}</AlertDescription>
+                </Alert>
+              )}
+
               <Button
                 type="submit"
                 disabled={!canSubmit || submitting}
@@ -510,35 +557,50 @@ function ContestantDashboard() {
               {myReports.map((report) => {
                 const Icon = STATUS_ICON[report.status];
                 const category = categories.find((c) => c.id === report.categoryId);
+                const reportEvaluation = evaluations.find((e) => e.reportId === report.id) ?? null;
+                const isDisqualified = report.status === "disqualified";
+                const isPublished = evaluations.some(
+                  (e) => e.reportId === report.id && e.visibleToContestant,
+                );
+                const isWaitingForRelease = report.status === "completed" && !isPublished;
                 return (
-                  <Card key={report.id} className="py-0">
-                    <CardContent className="flex items-center justify-between gap-4 px-5 py-4">
-                      <div className="min-w-0">
-                        <p className="truncate text-base font-semibold">{report.title}</p>
-                        <p className="mt-0.5 text-sm text-muted-foreground">
-                          {category?.name ?? "Kategori"} &middot; {formatFileSize(report.fileSizeBytes)}{" "}
-                          &middot; {formatDate(report.submittedAt)}
-                        </p>
-                      </div>
-                      <div className="flex shrink-0 items-center gap-2">
-                        <Badge
-                          variant="outline"
-                          className={`gap-1 ${STATUS_BADGE_CLASS[report.status]}`}
-                        >
-                          <Icon className="size-3" />
-                          {STATUS_LABEL[report.status]}
-                        </Badge>
-                        {report.status === "completed" && (
-                          <Button
+                  <Card key={report.id}>
+                    <CardContent className="space-y-3">
+                      <div className="flex items-center justify-between gap-4">
+                        <div className="min-w-0">
+                          <p className="truncate text-base font-semibold">{report.title}</p>
+                          <p className="mt-0.5 text-sm text-muted-foreground">
+                            {category?.name ?? "Kategori"} &middot; {formatFileSize(report.fileSizeBytes)}{" "}
+                            &middot; {formatDate(report.submittedAt)}
+                          </p>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-2">
+                          <Badge
                             variant="outline"
-                            size="sm"
-                            className="transition-transform active:scale-[0.97]"
-                            onClick={() => setDetailReportId(report.id)}
+                            className={`gap-1 ${STATUS_BADGE_CLASS[report.status]}`}
                           >
-                            Ayrıntıları Göster
-                          </Button>
-                        )}
+                            <Icon className="size-3" />
+                            {isWaitingForRelease ? "Değerlendirildi" : STATUS_LABEL[report.status]}
+                          </Badge>
+                          {(isPublished || isDisqualified) && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="transition-transform active:scale-[0.97]"
+                              onClick={() => setDetailReportId(report.id)}
+                            >
+                              Ayrıntıları Göster
+                            </Button>
+                          )}
+                        </div>
                       </div>
+                      {isWaitingForRelease && (
+                        <p className="text-sm text-muted-foreground">
+                          Hakem değerlendirmeyi tamamladı, sonuç yönetici onayı/yayını
+                          bekleniyor.
+                        </p>
+                      )}
+                      <ReportTimeline report={report} evaluation={reportEvaluation} />
                     </CardContent>
                   </Card>
                 );
@@ -580,115 +642,151 @@ function ContestantDashboard() {
       </Sheet>
 
       <Dialog open={!!detailReportId} onOpenChange={(open) => !open && setDetailReportId(null)}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent
+          className={cn(
+            "gap-5 rounded-[28px] border border-zinc-200/80 bg-white/70 p-5 text-zinc-900 shadow-[0_20px_60px_-15px_rgba(0,0,0,0.15),0_0_0_1px_rgba(0,0,0,0.03)] backdrop-blur-xl sm:max-w-lg",
+            "dark:border-white/10 dark:bg-zinc-900/70 dark:text-zinc-50",
+          )}
+        >
           {detailReport && (
             <>
               <DialogHeader>
-                <DialogTitle>{detailReport.title}</DialogTitle>
-                <DialogDescription>Hakem değerlendirme sonucun</DialogDescription>
+                <DialogTitle className="text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
+                  {detailReport.title}
+                </DialogTitle>
+                <DialogDescription className="text-zinc-500 dark:text-zinc-400">
+                  Hakem değerlendirme sonucun
+                </DialogDescription>
               </DialogHeader>
 
-              {detailEvaluation ? (
+              <ReportTimeline report={detailReport} evaluation={detailLatestEvaluation} />
+
+              {detailAggregate ? (
                 <div className="space-y-5">
-                  <div className="flex items-center justify-between rounded-xl bg-muted/50 px-4 py-3">
-                    <span className="text-base font-medium text-muted-foreground">Toplam Puan</span>
-                    <span className="text-2xl font-bold text-primary">
-                      {detailEvaluation.totalScore}
-                      <span className="text-base font-medium text-muted-foreground">
+                  {detailDisqualification && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ type: "spring", stiffness: 400, damping: 30 }}
+                      className="flex items-start gap-2 rounded-2xl border border-red-200/80 bg-red-50/70 px-4 py-3 text-red-800 backdrop-blur-md dark:border-red-900/60 dark:bg-red-950/50 dark:text-red-300"
+                    >
+                      <XCircle className="mt-0.5 size-4 shrink-0" />
+                      <div>
+                        <p className="font-medium tracking-tight">Bu rapor elenmiştir</p>
+                        <p className="mt-0.5 text-sm text-red-800/80 dark:text-red-300/80">
+                          {detailDisqualification.findingText}
+                        </p>
+                      </div>
+                    </motion.div>
+                  )}
+
+                  <motion.div
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ type: "spring", stiffness: 400, damping: 30 }}
+                    className="flex items-center justify-between rounded-2xl border border-zinc-200/80 bg-white/70 px-4 py-3.5 backdrop-blur-md dark:border-white/10 dark:bg-zinc-900/70"
+                  >
+                    <div>
+                      <span className="text-sm font-medium tracking-tight text-zinc-900 dark:text-zinc-50">
+                        {detailAggregate.judgeCount > 1 ? "Ortalama Puan" : "Toplam Puan"}
+                      </span>
+                      {detailAggregate.judgeCount > 1 && (
+                        <p className="text-sm text-zinc-500 dark:text-zinc-400">
+                          {detailAggregate.judgeCount} hakemin ortalaması
+                        </p>
+                      )}
+                    </div>
+                    <span className="font-mono text-2xl font-semibold text-primary">
+                      {Math.round(detailAggregate.averageTotal * 10) / 10}
+                      <span className="text-sm font-medium text-zinc-500 dark:text-zinc-400">
                         {" "}
                         / {maxTotalScore}
                       </span>
                     </span>
-                  </div>
+                  </motion.div>
 
-                  <div className="space-y-4">
-                    {scoreCriteria.map((criterion) => {
-                      const criterionScore = detailEvaluation.criteriaScores.find(
-                        (cs) => cs.criterionId === criterion.id,
-                      );
-                      const score = criterionScore?.score ?? 0;
+                  <div className="grid grid-cols-2 gap-3">
+                    {scoreCriteria.map((criterion, i) => {
+                      const average =
+                        detailAggregate.criteriaAverages.find(
+                          (c) => c.criterionId === criterion.id,
+                        )?.average ?? 0;
+                      const singleComment =
+                        detailAggregate.judgeCount === 1
+                          ? detailAggregate.evaluations[0]?.criteriaScores.find(
+                              (cs) => cs.criterionId === criterion.id,
+                            )?.comment
+                          : undefined;
+                      const pct = Math.min(100, Math.round((average / criterion.maxScore) * 100));
                       return (
-                        <div key={criterion.id} className="space-y-1.5">
-                          <div className="flex items-center justify-between text-base">
-                            <span className="font-medium">{criterion.label}</span>
-                            <span className="text-muted-foreground">
-                              {score} / {criterion.maxScore}
+                        <motion.div
+                          key={criterion.id}
+                          initial={{ opacity: 0, y: 8 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          whileHover={{ scale: 1.005 }}
+                          transition={{
+                            type: "spring",
+                            stiffness: 400,
+                            damping: 30,
+                            delay: i * 0.03,
+                          }}
+                          className="relative col-span-1 overflow-hidden rounded-2xl border border-zinc-200/80 bg-white/70 p-3.5 pb-4.5 backdrop-blur-md hover:shadow-xl hover:shadow-black/5 dark:border-white/10 dark:bg-zinc-900/70"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <p className="text-sm font-medium tracking-tight text-zinc-900 dark:text-zinc-100">
+                              {criterion.label}
+                            </p>
+                            <span className="shrink-0 rounded-full bg-zinc-900/5 px-2 py-0.5 font-mono text-xs text-zinc-900 dark:bg-white/10 dark:text-zinc-100">
+                              {Math.round(average * 10) / 10}/{criterion.maxScore}
                             </span>
                           </div>
-                          <Progress value={(score / criterion.maxScore) * 100} />
-                          {criterionScore?.comment && (
-                            <p className="text-sm text-muted-foreground">
-                              {criterionScore.comment}
+                          {singleComment && (
+                            <p className="mt-1.5 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
+                              {singleComment}
                             </p>
                           )}
-                        </div>
+                          <div className="absolute inset-x-0 bottom-0 h-[2px] bg-zinc-900/5 dark:bg-white/10">
+                            <div
+                              className="h-full bg-primary/60"
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                        </motion.div>
                       );
                     })}
                   </div>
 
-                  {detailEvaluation.overallComment && (
-                    <div className="rounded-xl border border-border bg-muted/30 p-3">
-                      <p className="mb-1 text-base font-medium">Hakem Yorumu</p>
-                      <p className="text-base text-muted-foreground">
-                        {detailEvaluation.overallComment}
+                  {detailAggregate.evaluations.some((e) => e.overallComment) && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ type: "spring", stiffness: 400, damping: 30 }}
+                      className="space-y-2.5 rounded-r-2xl border-l-2 border-primary bg-zinc-100/50 py-3 pr-4 pl-4 backdrop-blur-md dark:bg-zinc-800/40"
+                    >
+                      <p className="text-xs font-medium tracking-tight text-zinc-500 dark:text-zinc-400">
+                        {detailAggregate.judgeCount > 1 ? "Hakem Yorumları" : "Hakem Yorumu"}
                       </p>
-                    </div>
+                      {detailAggregate.evaluations.map((e, i) =>
+                        e.overallComment ? (
+                          <p
+                            key={e.id}
+                            className="text-base leading-relaxed text-zinc-700 dark:text-zinc-200"
+                          >
+                            {detailAggregate.judgeCount > 1 && (
+                              <span className="font-medium text-zinc-900 dark:text-zinc-50">
+                                Hakem {i + 1}:{" "}
+                              </span>
+                            )}
+                            {e.overallComment}
+                          </p>
+                        ) : null,
+                      )}
+                    </motion.div>
                   )}
 
-                  {loadingAnalysis ? (
-                    <div className="space-y-2">
-                      <Skeleton className="h-4 w-40" />
-                      <Skeleton className="h-16 w-full" />
-                    </div>
-                  ) : (
-                    detailAnalysis && (
-                      <div className="space-y-4 border-t border-border pt-4">
-                        <p className="text-base font-medium">AI Değerlendirme Özeti</p>
-                        <p className="text-base text-muted-foreground">
-                          {detailAnalysis.contentAnalysis.summary}
-                        </p>
-
-                        <div className="space-y-1.5">
-                          <p className="flex items-center gap-1.5 text-sm font-medium text-emerald-600 dark:text-emerald-400">
-                            <CheckCircle2 className="size-4" />
-                            Güçlü Yönler
-                          </p>
-                          <ul className="list-inside list-disc space-y-0.5 text-base text-muted-foreground">
-                            {detailAnalysis.contentAnalysis.strengths.map((s) => (
-                              <li key={s}>{s}</li>
-                            ))}
-                          </ul>
-                        </div>
-
-                        <div className="space-y-1.5">
-                          <p className="flex items-center gap-1.5 text-sm font-medium text-amber-600 dark:text-amber-400">
-                            <AlertTriangle className="size-4" />
-                            Gelişime Açık Yönler
-                          </p>
-                          <ul className="list-inside list-disc space-y-0.5 text-base text-muted-foreground">
-                            {detailAnalysis.contentAnalysis.weaknesses.map((s) => (
-                              <li key={s}>{s}</li>
-                            ))}
-                          </ul>
-                        </div>
-
-                        <div className="space-y-1.5">
-                          <p className="flex items-center gap-1.5 text-sm font-medium text-primary">
-                            <Lightbulb className="size-4" />
-                            Öneriler
-                          </p>
-                          <ul className="list-inside list-disc space-y-0.5 text-base text-muted-foreground">
-                            {detailAnalysis.contentAnalysis.improvementSuggestions.map((s) => (
-                              <li key={s}>{s}</li>
-                            ))}
-                          </ul>
-                        </div>
-                      </div>
-                    )
-                  )}
                 </div>
               ) : (
-                <p className="text-base text-muted-foreground">
+                <p className="text-base text-zinc-500 dark:text-zinc-400">
                   Bu rapor için değerlendirme detayı henüz bulunmuyor.
                 </p>
               )}

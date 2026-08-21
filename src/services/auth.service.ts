@@ -2,18 +2,28 @@ import { useAppStore, type AppState } from "@/store/useAppStore";
 import type { UserRole } from "@/types";
 import { simulateNetworkDelay } from "./delay";
 
-export function login(
+export async function login(
   email: string,
   password: string,
-): Promise<ReturnType<AppState["login"]>> {
-  const result = useAppStore.getState().login(email, password);
+): Promise<Awaited<ReturnType<AppState["login"]>>> {
+  const result = await useAppStore.getState().login(email, password);
   return simulateNetworkDelay(result);
 }
 
-export function register(
+export async function register(
   input: Parameters<AppState["register"]>[0],
-): Promise<ReturnType<AppState["register"]>> {
-  const result = useAppStore.getState().register(input);
+): Promise<Awaited<ReturnType<AppState["register"]>>> {
+  const result = await useAppStore.getState().register(input);
+  return simulateNetworkDelay(result);
+}
+
+export function verifyEmail(code: string): Promise<ReturnType<AppState["verifyEmail"]>> {
+  const result = useAppStore.getState().verifyEmail(code);
+  return simulateNetworkDelay(result);
+}
+
+export function resendEmailVerification(): Promise<ReturnType<AppState["resendEmailVerification"]>> {
+  const result = useAppStore.getState().resendEmailVerification();
   return simulateNetworkDelay(result);
 }
 
@@ -35,10 +45,10 @@ export function requestPasswordReset(
   return simulateNetworkDelay(result);
 }
 
-export function resetPassword(
+export async function resetPassword(
   code: string,
   newPassword: string,
-): Promise<ReturnType<AppState["resetPassword"]>> {
-  const result = useAppStore.getState().resetPassword(code, newPassword);
+): Promise<Awaited<ReturnType<AppState["resetPassword"]>>> {
+  const result = await useAppStore.getState().resetPassword(code, newPassword);
   return simulateNetworkDelay(result);
 }
