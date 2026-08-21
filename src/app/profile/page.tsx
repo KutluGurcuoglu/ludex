@@ -453,14 +453,17 @@ function ProfileView() {
 
               {isTurkishCitizen && (
                 <div className="space-y-2">
-                  <Label htmlFor="profile-national-id">T.C. Kimlik Numarası</Label>
+                  <Label htmlFor="profile-national-id">
+                    T.C. Kimlik Numarası{" "}
+                    <span className="font-normal text-muted-foreground">(opsiyonel)</span>
+                  </Label>
                   <Input
                     id="profile-national-id"
                     inputMode="numeric"
                     maxLength={11}
                     value={nationalId}
                     onChange={(e) => setNationalId(e.target.value.replace(/\D/g, "").slice(0, 11))}
-                    placeholder="11 haneli kimlik numaranız"
+                    placeholder="11 haneli kimlik numaranız (opsiyonel)"
                   />
                 </div>
               )}

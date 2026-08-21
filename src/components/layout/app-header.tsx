@@ -19,15 +19,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useAppStore, useCurrentUser } from "@/store/useAppStore";
-import type { UserRole } from "@/types";
 
-const ROLE_LABELS: Record<UserRole, string> = {
-  admin: "Yönetici",
-  judge: "Hakem",
-  contestant: "Yarışmacı",
-};
-
-export function AppHeader({ subtitle }: { subtitle?: string } = {}) {
+export function AppHeader({}: { subtitle?: string } = {}) {
   const user = useCurrentUser();
   const logout = useAppStore((s) => s.logout);
   const router = useRouter();
@@ -42,9 +35,7 @@ export function AppHeader({ subtitle }: { subtitle?: string } = {}) {
           <span className="text-brand-gradient text-lg font-bold tracking-tight">
             Ludex
           </span>
-          <span className="text-sm text-muted-foreground">
-            {subtitle ?? `${ROLE_LABELS[user.role]} Paneli`}
-          </span>
+          <span className="text-sm text-muted-foreground">{user.name}</span>
         </div>
 
         <div className="ml-auto flex items-center gap-3">
@@ -58,15 +49,13 @@ export function AppHeader({ subtitle }: { subtitle?: string } = {}) {
           <Link
             href="/profile"
             className="flex items-center gap-2 rounded-full transition-opacity hover:opacity-75"
+            aria-label="Profilim"
           >
             <Avatar className="size-8">
               <AvatarFallback className="text-sm">
                 {user.name.slice(0, 2).toUpperCase()}
               </AvatarFallback>
             </Avatar>
-            <span className="hidden text-base font-medium sm:inline">
-              {ROLE_LABELS[user.role]} Paneli
-            </span>
           </Link>
           <Button
             variant="ghost"

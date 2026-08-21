@@ -330,6 +330,55 @@ function ResultsReleaseSection({ category }: { category: Category }) {
   );
 }
 
+/**
+ * Admin, bu kategorideki hakemlerin atanmış raporları değerlendirmeyi bitirmesi gereken
+ * son tarihi belirler. Hakem panelinde uyarı olarak gösterilir; zorunlu bir kilit değildir.
+ */
+function EvaluationDeadlineSection({ category }: { category: Category }) {
+  const [deadline, setDeadline] = useState(
+    category.evaluationDeadline ? toLocalInputValue(category.evaluationDeadline) : "",
+  );
+  const [saving, setSaving] = useState(false);
+
+  async function handleSave(e: FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    await categoriesService.setCategoryEvaluationDeadline(
+      category.id,
+      deadline ? new Date(deadline).toISOString() : null,
+    );
+    setSaving(false);
+    toast.success(deadline ? "Değerlendirme son tarihi belirlendi." : "Son tarih kaldırıldı.");
+  }
+
+  return (
+    <div className="space-y-3">
+      <Label>Değerlendirme Son Tarihi</Label>
+      <p className="text-sm text-muted-foreground">
+        Hakemlerin bu kategorideki atanmış raporları bitirmesi gereken tarih. Panellerinde uyarı
+        olarak gösterilir.
+      </p>
+      <form onSubmit={handleSave} className="flex flex-wrap items-end gap-2">
+        <div className="flex-1 space-y-1.5">
+          <Label htmlFor={`eval-deadline-${category.id}`} className="text-sm text-muted-foreground">
+            Son tarih (opsiyonel)
+          </Label>
+          <Input
+            id={`eval-deadline-${category.id}`}
+            type="datetime-local"
+            value={deadline}
+            onChange={(e) => setDeadline(e.target.value)}
+          />
+        </div>
+        <Button type="submit" size="sm" variant="outline" disabled={saving}>
+          {saving && <Loader2 className="size-4 animate-spin" />}
+          Kaydet
+        </Button>
+      </form>
+    </div>
+  );
+}
+
 export function CompetitionEditSheet({ competition }: { competition: Category }) {
   const [name, setName] = useState(competition.name);
   const [description, setDescription] = useState(competition.description ?? "");
@@ -431,6 +480,10 @@ export function CompetitionEditSheet({ competition }: { competition: Category })
         <Separator />
 
         <ResultsReleaseSection category={competition} />
+
+        <Separator />
+
+        <EvaluationDeadlineSection category={competition} />
       </div>
     </>
   );

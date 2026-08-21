@@ -28,6 +28,8 @@ export interface Category {
   resultsReleaseAt?: string | null;
   /** Bu kategoride en son toplu yayının gerçekleştiği an (bilgi amaçlı). */
   resultsReleasedAt?: string | null;
+  /** Hakemlerin bu kategorideki atanmış raporları değerlendirmeyi bitirmesi gereken son tarih. */
+  evaluationDeadline?: string | null;
 }
 
 export interface User {

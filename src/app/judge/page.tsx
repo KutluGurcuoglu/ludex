@@ -4,10 +4,12 @@ import { useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent } 
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
+  AlertTriangle,
   ArrowLeft,
   ArrowRight,
   BadgeCheck,
   Building2,
+  CalendarClock,
   Check,
   CheckCircle2,
   Clock,
@@ -949,6 +951,28 @@ function JudgeDashboard() {
                 <p className="mt-1 text-base leading-relaxed text-muted-foreground">
                   Bu kategoride sana atanmış raporlar.
                 </p>
+                {selectedCategory.evaluationDeadline && pending.length + inReview.length > 0 && (
+                  <div
+                    className={cn(
+                      "mt-3 flex items-center gap-2 rounded-lg border px-3 py-2 text-sm",
+                      new Date(selectedCategory.evaluationDeadline) < new Date()
+                        ? "border-destructive/30 bg-destructive/5 text-destructive"
+                        : "border-amber-500/30 bg-amber-500/5 text-amber-600 dark:text-amber-400",
+                    )}
+                  >
+                    {new Date(selectedCategory.evaluationDeadline) < new Date() ? (
+                      <AlertTriangle className="size-4 shrink-0" />
+                    ) : (
+                      <CalendarClock className="size-4 shrink-0" />
+                    )}
+                    <span>
+                      {new Date(selectedCategory.evaluationDeadline) < new Date()
+                        ? "Değerlendirme son tarihi geçti: "
+                        : "Değerlendirmeleri bitirmen gereken son tarih: "}
+                      {new Date(selectedCategory.evaluationDeadline).toLocaleString("tr-TR")}
+                    </span>
+                  </div>
+                )}
               </div>
 
               <div className="mb-8 grid gap-4 sm:grid-cols-3">

@@ -43,3 +43,8 @@ export function releaseCategoryResults(id: string): Promise<void> {
   useAppStore.getState().releaseCategoryResults(id);
   return simulateNetworkDelay(undefined);
 }
+
+export function setCategoryEvaluationDeadline(id: string, deadline: string | null): Promise<void> {
+  useAppStore.getState().setCategoryEvaluationDeadline(id, deadline);
+  return simulateNetworkDelay(undefined);
+}

@@ -417,6 +417,7 @@ export interface AppState {
   approveEvaluation: (evaluationId: string) => void;
   setCategoryReleaseDate: (categoryId: string, releaseAt: string | null) => void;
   releaseCategoryResults: (categoryId: string) => void;
+  setCategoryEvaluationDeadline: (categoryId: string, deadline: string | null) => void;
   checkScheduledReleases: () => void;
 
   addCategory: (input: { name: string; description?: string }) => Category;
@@ -1002,6 +1003,14 @@ export const useAppStore = create<AppState>()(
         set((state) => ({
           categories: state.categories.map((c) =>
             c.id === categoryId ? { ...c, resultsReleaseAt: releaseAt } : c,
+          ),
+        }));
+      },
+
+      setCategoryEvaluationDeadline: (categoryId, deadline) => {
+        set((state) => ({
+          categories: state.categories.map((c) =>
+            c.id === categoryId ? { ...c, evaluationDeadline: deadline } : c,
           ),
         }));
       },
