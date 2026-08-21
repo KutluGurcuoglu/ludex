@@ -35,7 +35,7 @@ export function AppHeader({ subtitle }: { subtitle?: string } = {}) {
   if (!user) return null;
 
   return (
-    <header className="sticky top-0 z-40 bg-background/70 shadow-[0_8px_20px_-12px_rgba(0,0,0,0.12)] backdrop-blur-2xl">
+    <header className="glass-toolbar sticky top-0 z-40">
       <div className="flex h-16 w-full items-center justify-between px-6 md:px-12">
         <div className="flex flex-col items-start justify-center leading-tight">
           <span className="text-brand-gradient text-lg font-bold tracking-tight">

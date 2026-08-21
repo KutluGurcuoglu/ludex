@@ -187,6 +187,15 @@
   .animate-scan-beam {
     animation: scan-beam 3.5s ease-in-out infinite;
   }
+
+  /* Floating chrome (headers, sticky toolbars) as a translucent material layer,
+     not an opaque bar — content scrolls underneath it. A soft shadow fade reads
+     as a scroll-edge effect; a hard 1px border would read as a harsh divider. */
+  .glass-toolbar {
+    background: color-mix(in oklch, var(--background) 75%, transparent);
+    backdrop-filter: blur(20px) saturate(150%);
+    box-shadow: 0 8px 12px -8px color-mix(in oklch, var(--foreground) 10%, transparent);
+  }
 }
 
 @keyframes glow-drift-a {
@@ -256,5 +265,22 @@
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+}
+
+/* Reduced motion doesn't cover translucency or contrast — handle them independently. */
+@media (prefers-reduced-transparency: reduce) {
+  .glass-toolbar {
+    background: var(--background);
+    backdrop-filter: none;
+  }
+}
+
+@media (prefers-contrast: more) {
+  .glass-toolbar {
+    background: var(--background);
+    backdrop-filter: none;
+    box-shadow: none;
+    border-bottom: 2px solid var(--border);
   }
 }
