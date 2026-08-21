@@ -6,6 +6,7 @@ import type {
   AppNotification,
   Category,
   CompetitionDocument,
+  FaqEntry,
   JudgeApprovalStatus,
   JudgeEvaluation,
   JudgeWorkStatus,
@@ -121,6 +122,50 @@ const SCORE_CRITERIA: ScoreCriterion[] = [
     label: "Sunum ve Raporlama Kalitesi",
     maxScore: 20,
     description: "Raporun anlaşılırlığı ve sunumu",
+  },
+];
+
+const SEED_FAQS: FaqEntry[] = [
+  {
+    id: "faq-judge-1",
+    role: "judge",
+    question: "Bana atanan bir rapor listede görünmüyor, ne yapmalıyım?",
+    answer:
+      "Rapor havuzuna admin tarafından eklenip sana atanmasını bekle. Kategori sekmelerini kontrol et; rapor farklı bir kategoride görünüyor olabilir.",
+  },
+  {
+    id: "faq-judge-2",
+    role: "judge",
+    question: "Değerlendirmemi gönderdim ama yarışmacıya gitmedi, neden?",
+    answer:
+      "Gönderdiğin değerlendirme önce admin onayından geçer. Onaylanıp yayınlandığında hem sen hem yarışmacı bildirim alırsınız; bu genelde kısa sürer.",
+  },
+  {
+    id: "faq-judge-3",
+    role: "judge",
+    question: "Hakem başvurum hâlâ 'Onay Bekliyor' görünüyor.",
+    answer:
+      "Admin başvuruları elden geçirdikçe onaylar. Başvurundan sonra biraz beklemen gerekebilir; onaylandığında bildirim alacaksın.",
+  },
+  {
+    id: "faq-contestant-1",
+    role: "contestant",
+    question: "Raporum ne zaman değerlendirilecek?",
+    answer:
+      "Admin raporunu bir hakeme atadıktan sonra değerlendirme süreci başlar. Raporunun durumunu 'Raporlarım' sekmesindeki zaman çizelgesinden takip edebilirsin.",
+  },
+  {
+    id: "faq-contestant-2",
+    role: "contestant",
+    question: "Değerlendirme tamamlandı ama puanları göremiyorum.",
+    answer:
+      "Hakem bitirdikten sonra sonuç önce admin onayından geçer. Onaylanıp yayınlanınca bildirim alır ve sonucu görebilirsin.",
+  },
+  {
+    id: "faq-contestant-3",
+    role: "contestant",
+    question: "Yanlış kategoriye rapor gönderdim, düzeltebilir miyim?",
+    answer: "Kendi başına düzenleyemezsin; aşağıdan admin'e destek talebi göndererek durumu bildir.",
   },
 ];
 
@@ -303,6 +348,7 @@ interface PasswordResetRequest {
 export interface AppState {
   categories: Category[];
   scoreCriteria: ScoreCriterion[];
+  faqs: FaqEntry[];
   users: User[];
   credentials: Record<string, string>;
   reports: Report[];
@@ -435,6 +481,9 @@ export interface AppState {
     updates: Partial<Pick<ScoreCriterion, "label" | "maxScore" | "description">>,
   ) => void;
   deleteScoreCriterion: (id: string) => void;
+  addFaqEntry: (input: Omit<FaqEntry, "id">) => FaqEntry;
+  updateFaqEntry: (id: string, updates: Partial<Pick<FaqEntry, "question" | "answer">>) => void;
+  deleteFaqEntry: (id: string) => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -442,6 +491,7 @@ export const useAppStore = create<AppState>()(
     (set, get) => ({
       categories: CATEGORIES,
       scoreCriteria: SCORE_CRITERIA,
+      faqs: SEED_FAQS,
       users: SEED_USERS,
       credentials: SEED_CREDENTIALS,
       reports: SEED_REPORTS,
@@ -1138,6 +1188,24 @@ export const useAppStore = create<AppState>()(
       deleteScoreCriterion: (id) => {
         set((state) => ({
           scoreCriteria: state.scoreCriteria.filter((c) => c.id !== id),
+        }));
+      },
+
+      addFaqEntry: ({ role, question, answer }) => {
+        const newFaq: FaqEntry = { id: `faq-${crypto.randomUUID()}`, role, question, answer };
+        set((state) => ({ faqs: [...state.faqs, newFaq] }));
+        return newFaq;
+      },
+
+      updateFaqEntry: (id, updates) => {
+        set((state) => ({
+          faqs: state.faqs.map((f) => (f.id === id ? { ...f, ...updates } : f)),
+        }));
+      },
+
+      deleteFaqEntry: (id) => {
+        set((state) => ({
+          faqs: state.faqs.filter((f) => f.id !== id),
         }));
       },
     }),

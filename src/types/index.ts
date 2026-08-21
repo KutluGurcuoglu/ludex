@@ -311,6 +311,14 @@ export interface SupportMessage {
   resolvedAt?: string | null;
 }
 
+/** Admin tarafından yönetilen, hakem/yarışmacı ayarlar sayfasında gösterilen SSS girdisi. */
+export interface FaqEntry {
+  id: string;
+  role: "judge" | "contestant";
+  question: string;
+  answer: string;
+}
+
 export interface CopilotChatMessage {
   id: string;
   role: "user" | "assistant";

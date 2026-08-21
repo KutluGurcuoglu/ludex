@@ -220,45 +220,9 @@ function NotificationsSection({ user }: { user: User }) {
   );
 }
 
-const FAQ_BY_ROLE: Record<"judge" | "contestant", { question: string; answer: string }[]> = {
-  judge: [
-    {
-      question: "Bana atanan bir rapor listede görünmüyor, ne yapmalıyım?",
-      answer:
-        "Rapor havuzuna admin tarafından eklenip sana atanmasını bekle. Kategori sekmelerini kontrol et; rapor farklı bir kategoride görünüyor olabilir.",
-    },
-    {
-      question: "Değerlendirmemi gönderdim ama yarışmacıya gitmedi, neden?",
-      answer:
-        "Gönderdiğin değerlendirme önce admin onayından geçer. Onaylanıp yayınlandığında hem sen hem yarışmacı bildirim alırsınız; bu genelde kısa sürer.",
-    },
-    {
-      question: "Hakem başvurum hâlâ 'Onay Bekliyor' görünüyor.",
-      answer:
-        "Admin başvuruları elden geçirdikçe onaylar. Başvurundan sonra biraz beklemen gerekebilir; onaylandığında bildirim alacaksın.",
-    },
-  ],
-  contestant: [
-    {
-      question: "Raporum ne zaman değerlendirilecek?",
-      answer:
-        "Admin raporunu bir hakeme atadıktan sonra değerlendirme süreci başlar. Raporunun durumunu 'Raporlarım' sekmesindeki zaman çizelgesinden takip edebilirsin.",
-    },
-    {
-      question: "Değerlendirme tamamlandı ama puanları göremiyorum.",
-      answer:
-        "Hakem bitirdikten sonra sonuç önce admin onayından geçer. Onaylanıp yayınlanınca bildirim alır ve sonucu görebilirsin.",
-    },
-    {
-      question: "Yanlış kategoriye rapor gönderdim, düzeltebilir miyim?",
-      answer:
-        "Kendi başına düzenleyemezsin; aşağıdan admin'e destek talebi göndererek durumu bildir.",
-    },
-  ],
-};
-
 function FaqSupportSection({ user }: { user: User }) {
   const role = user.role as "judge" | "contestant";
+  const faqs = useAppStore((s) => s.faqs).filter((f) => f.role === role);
   const [subject, setSubject] = useState("");
   const [message, setMessage] = useState("");
   const [sending, setSending] = useState(false);
@@ -286,16 +250,20 @@ function FaqSupportSection({ user }: { user: User }) {
         <CardDescription>Sorunun cevabı burada yoksa aşağıdan admin&apos;e ulaşabilirsin.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <Accordion type="single" collapsible>
-          {FAQ_BY_ROLE[role].map((item, i) => (
-            <AccordionItem key={item.question} value={`faq-${i}`}>
-              <AccordionTrigger className="text-left text-base">{item.question}</AccordionTrigger>
-              <AccordionContent className="text-base text-muted-foreground">
-                {item.answer}
-              </AccordionContent>
-            </AccordionItem>
-          ))}
-        </Accordion>
+        {faqs.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Henüz bir SSS eklenmemiş.</p>
+        ) : (
+          <Accordion type="single" collapsible>
+            {faqs.map((item) => (
+              <AccordionItem key={item.id} value={item.id}>
+                <AccordionTrigger className="text-left text-base">{item.question}</AccordionTrigger>
+                <AccordionContent className="text-base text-muted-foreground">
+                  {item.answer}
+                </AccordionContent>
+              </AccordionItem>
+            ))}
+          </Accordion>
+        )}
 
         <Separator />
 
@@ -333,7 +301,7 @@ function FaqSupportSection({ user }: { user: User }) {
           </div>
           <Button type="submit" disabled={sending} className="gap-1.5">
             {sending ? <Loader2 className="size-4 animate-spin" /> : <Mail className="size-4" />}
-            {sending ? "Gönderiliyor..." : "Admin'e Gönder"}
+            {sending ? "Gönderiliyor..." : "Destek İste"}
           </Button>
           {sent && (
             <p className="text-sm text-emerald-600 dark:text-emerald-400">
