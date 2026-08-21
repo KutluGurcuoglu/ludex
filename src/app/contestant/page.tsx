@@ -11,7 +11,6 @@ import {
   Loader2,
   Menu,
   Send,
-  Sparkles,
   UploadCloud,
   User as UserIcon,
   X,
@@ -55,8 +54,7 @@ import { useAppStore, useCurrentUser } from "@/store/useAppStore";
 import * as reportsService from "@/services/reports.service";
 import * as categoriesService from "@/services/categories.service";
 import * as evaluationsService from "@/services/evaluations.service";
-import * as aiAnalysisService from "@/services/ai-analysis.service";
-import type { AIAnalysisResult, ReportStatus } from "@/types";
+import type { ReportStatus } from "@/types";
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20 MB
 
@@ -204,25 +202,11 @@ function ContestantDashboard() {
   const [isDragging, setIsDragging] = useState(false);
   const [fileError, setFileError] = useState<string | null>(null);
   const [detailReportId, setDetailReportId] = useState<string | null>(null);
-  const [detailAnalysis, setDetailAnalysis] = useState<AIAnalysisResult | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const [navOpen, setNavOpen] = useState(false);
   const [activeSection, setActiveSection] = useState<Section>("overview");
-
-  const loadingAnalysis = !!detailReportId && detailAnalysis?.reportId !== detailReportId;
-
-  useEffect(() => {
-    if (!detailReportId) return;
-    let active = true;
-    aiAnalysisService.getAIAnalysis(detailReportId).then((result) => {
-      if (active) setDetailAnalysis(result);
-    });
-    return () => {
-      active = false;
-    };
-  }, [detailReportId]);
 
   useEffect(() => {
     let active = true;
@@ -765,79 +749,6 @@ function ContestantDashboard() {
                     </motion.div>
                   )}
 
-                  {loadingAnalysis ? (
-                    <div className="space-y-2">
-                      <Skeleton className="h-4 w-40" />
-                      <Skeleton className="h-16 w-full" />
-                    </div>
-                  ) : (
-                    detailAnalysis && (
-                      <motion.div
-                        initial={{ opacity: 0, y: 6 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ type: "spring", stiffness: 400, damping: 30 }}
-                        className="space-y-4 border-t border-zinc-200/80 pt-4 dark:border-white/10"
-                      >
-                        <p className="flex items-center gap-1.5 text-sm font-medium tracking-tight text-zinc-900 dark:text-zinc-50">
-                          <Sparkles className="size-3.5 text-primary opacity-80" />
-                          AI Analiz Özeti
-                        </p>
-                        <p className="text-sm leading-relaxed text-zinc-500 dark:text-zinc-400">
-                          {detailAnalysis.contentAnalysis.summary}
-                        </p>
-
-                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                          <div className="space-y-1.5">
-                            <p className="text-xs font-medium tracking-tight text-zinc-500 dark:text-zinc-400">
-                              Güçlü Yönler
-                            </p>
-                            <ul className="space-y-1.5">
-                              {detailAnalysis.contentAnalysis.strengths.map((s) => (
-                                <li key={s} className="flex items-start gap-2">
-                                  <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-emerald-500" />
-                                  <span className="text-sm leading-relaxed text-zinc-700 dark:text-zinc-200">
-                                    {s}
-                                  </span>
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-
-                          <div className="space-y-1.5">
-                            <p className="text-xs font-medium tracking-tight text-zinc-500 dark:text-zinc-400">
-                              Gelişime Açık Yönler
-                            </p>
-                            <ul className="space-y-1.5">
-                              {detailAnalysis.contentAnalysis.weaknesses.map((s) => (
-                                <li key={s} className="flex items-start gap-2">
-                                  <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-amber-500" />
-                                  <span className="text-sm leading-relaxed text-zinc-700 dark:text-zinc-200">
-                                    {s}
-                                  </span>
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                        </div>
-
-                        <div className="space-y-1.5">
-                          <p className="text-xs font-medium tracking-tight text-zinc-500 dark:text-zinc-400">
-                            Öneriler
-                          </p>
-                          <ul className="space-y-1.5">
-                            {detailAnalysis.contentAnalysis.improvementSuggestions.map((s) => (
-                              <li key={s} className="flex items-start gap-2">
-                                <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-primary" />
-                                <span className="text-sm leading-relaxed text-zinc-700 dark:text-zinc-200">
-                                  {s}
-                                </span>
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      </motion.div>
-                    )
-                  )}
                 </div>
               ) : (
                 <p className="text-base text-zinc-500 dark:text-zinc-400">
