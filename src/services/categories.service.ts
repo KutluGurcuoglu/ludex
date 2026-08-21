@@ -33,3 +33,13 @@ export function uploadCategoryTemplate(id: string, doc: CompetitionDocument): Pr
   useAppStore.getState().setCategoryTemplate(id, doc);
   return simulateNetworkDelay(undefined);
 }
+
+export function setCategoryReleaseDate(id: string, releaseAt: string | null): Promise<void> {
+  useAppStore.getState().setCategoryReleaseDate(id, releaseAt);
+  return simulateNetworkDelay(undefined);
+}
+
+export function releaseCategoryResults(id: string): Promise<void> {
+  useAppStore.getState().releaseCategoryResults(id);
+  return simulateNetworkDelay(undefined);
+}

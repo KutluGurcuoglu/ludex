@@ -250,10 +250,14 @@ function ContestantDashboard() {
     () => evaluations.filter((e) => e.reportId === detailReportId),
     [evaluations, detailReportId],
   );
-  // Birden fazla hakem atanmışsa puanlar ortalanır; büyük sapmalarda admin zaten
-  // uyarılıyor (bkz. admin/pool), yarışmacıya tek bir adil sonuç gösterilir.
+  // Hakem bitirir bitirmez puan görünmez — admin tek tek onaylayana ya da kategori
+  // toplu yayınlanana kadar (visibleToContestant) yarışmacıya sadece "sonuç bekleniyor" gösterilir.
   const detailAggregate = useMemo(
-    () => aggregateEvaluations(detailReportEvaluations, scoreCriteria),
+    () =>
+      aggregateEvaluations(
+        detailReportEvaluations.filter((e) => e.visibleToContestant),
+        scoreCriteria,
+      ),
     [detailReportEvaluations, scoreCriteria],
   );
   const detailDisqualification = detailReportEvaluations
@@ -536,6 +540,11 @@ function ContestantDashboard() {
                 const Icon = STATUS_ICON[report.status];
                 const category = categories.find((c) => c.id === report.categoryId);
                 const reportEvaluation = evaluations.find((e) => e.reportId === report.id) ?? null;
+                const isDisqualified = report.status === "disqualified";
+                const isPublished = evaluations.some(
+                  (e) => e.reportId === report.id && e.visibleToContestant,
+                );
+                const isWaitingForRelease = report.status === "completed" && !isPublished;
                 return (
                   <Card key={report.id}>
                     <CardContent className="space-y-3">
@@ -553,9 +562,9 @@ function ContestantDashboard() {
                             className={`gap-1 ${STATUS_BADGE_CLASS[report.status]}`}
                           >
                             <Icon className="size-3" />
-                            {STATUS_LABEL[report.status]}
+                            {isWaitingForRelease ? "Değerlendirildi" : STATUS_LABEL[report.status]}
                           </Badge>
-                          {(report.status === "completed" || report.status === "disqualified") && (
+                          {(isPublished || isDisqualified) && (
                             <Button
                               variant="outline"
                               size="sm"
@@ -567,6 +576,12 @@ function ContestantDashboard() {
                           )}
                         </div>
                       </div>
+                      {isWaitingForRelease && (
+                        <p className="text-sm text-muted-foreground">
+                          Hakem değerlendirmeyi tamamladı, sonuç yönetici onayı/yayını
+                          bekleniyor.
+                        </p>
+                      )}
                       <ReportTimeline report={report} evaluation={reportEvaluation} />
                     </CardContent>
                   </Card>

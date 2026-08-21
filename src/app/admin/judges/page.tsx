@@ -1,15 +1,18 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Search } from "lucide-react";
+import { toast } from "sonner";
+import { CheckCircle2, Loader2, Search, Send } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useAppStore } from "@/store/useAppStore";
+import * as evaluationsService from "@/services/evaluations.service";
 import { APPROVAL_STATUS_BADGE_CLASS, APPROVAL_STATUS_LABEL, STATUS_BADGE_CLASS, STATUS_LABEL, useViewMode } from "../_lib/shared";
 
 export default function AdminJudgesPage() {
@@ -23,6 +26,14 @@ export default function AdminJudgesPage() {
   const judges = useMemo(() => users.filter((u) => u.role === "judge"), [users]);
   const [judgeSearch, setJudgeSearch] = useState("");
   const [selectedJudgeId, setSelectedJudgeId] = useState<string | null>(null);
+  const [approvingId, setApprovingId] = useState<string | null>(null);
+
+  async function handleApprove(evaluationId: string) {
+    setApprovingId(evaluationId);
+    await evaluationsService.approveEvaluation(evaluationId);
+    setApprovingId(null);
+    toast.success("Sonuç yarışmacıya yayınlandı.");
+  }
 
   const filteredJudges = useMemo(() => {
     const q = judgeSearch.trim().toLowerCase();
@@ -247,6 +258,35 @@ export default function AdminJudgesPage() {
                               “{evaluation.overallComment}”
                             </p>
                           )}
+                          <div className="flex items-center justify-between border-t border-border pt-2">
+                            {evaluation.visibleToContestant ? (
+                              <Badge
+                                variant="outline"
+                                className="gap-1 border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300"
+                              >
+                                <CheckCircle2 className="size-3" />
+                                Yarışmacıya yayınlandı
+                              </Badge>
+                            ) : (
+                              <>
+                                <Badge variant="outline">Onay bekliyor</Badge>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  disabled={approvingId === evaluation.id}
+                                  className="gap-1.5"
+                                  onClick={() => handleApprove(evaluation.id)}
+                                >
+                                  {approvingId === evaluation.id ? (
+                                    <Loader2 className="size-3.5 animate-spin" />
+                                  ) : (
+                                    <Send className="size-3.5" />
+                                  )}
+                                  Onayla ve Yayınla
+                                </Button>
+                              </>
+                            )}
+                          </div>
                         </div>
                       ))}
                     </div>

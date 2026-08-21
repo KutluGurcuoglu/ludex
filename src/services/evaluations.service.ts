@@ -23,6 +23,11 @@ export function resolveDisqualification(
   return simulateNetworkDelay(undefined);
 }
 
+export function approveEvaluation(evaluationId: string): Promise<void> {
+  useAppStore.getState().approveEvaluation(evaluationId);
+  return simulateNetworkDelay(undefined);
+}
+
 export function addScoreCriterion(
   input: Parameters<AppState["addScoreCriterion"]>[0],
 ): Promise<ScoreCriterion> {

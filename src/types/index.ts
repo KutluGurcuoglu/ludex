@@ -23,6 +23,11 @@ export interface Category {
   specification?: CompetitionDocument;
   reportTemplate?: CompetitionDocument;
   createdAt: string;
+  /** Admin bu kategori için bir sonuç yayın tarihi planladıysa; geçince tüm onaylı
+   * değerlendirmeler toplu olarak yarışmacılara açılır. */
+  resultsReleaseAt?: string | null;
+  /** Bu kategoride en son toplu yayının gerçekleştiği an (bilgi amaçlı). */
+  resultsReleasedAt?: string | null;
 }
 
 export interface User {
@@ -249,6 +254,9 @@ export interface JudgeEvaluation {
   overallComment: string;
   status: EvaluationStatus;
   disqualificationRecommendation?: DisqualificationRecommendation | null;
+  /** Admin bu değerlendirmeyi onaylayıp (tek tek ya da kategori yayınıyla toplu) yarışmacıya
+   * açtıysa true olur. Hakem gönderdiği anda otomatik açılmaz — admin kapısından geçer. */
+  visibleToContestant?: boolean;
   updatedAt: string;
 }
 
@@ -267,6 +275,8 @@ export interface AppNotification {
   link?: string;
   createdAt: string;
   readAt: string | null;
+  /** Demo amaçlı: gerçek bir e-posta servisi yok, sadece "bu da e-posta olarak gitti" işareti. */
+  channel?: "in_app" | "in_app_and_email";
 }
 
 export interface CopilotChatMessage {

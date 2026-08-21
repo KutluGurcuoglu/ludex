@@ -228,4 +228,129 @@ describe("useAppStore", () => {
       useAppStore.getState().reports.find((r) => r.id === report.id)?.assignedJudgeIds,
     ).toEqual(["judge-2"]);
   });
+
+  it("does not notify the contestant until an admin approves the evaluation", () => {
+    const report = useAppStore.getState().addReport({
+      contestantId: "contestant-1",
+      categoryId: "cat-yz",
+      title: "Onay bekleyen rapor",
+      fileName: "pending-approval.pdf",
+      fileSizeBytes: 1000,
+      pdfUrl: "blob:test",
+    });
+    useAppStore.getState().assignReports([report.id], "judge-1");
+
+    const evaluationId = `eval-${report.id}-judge-1`;
+    useAppStore.getState().saveEvaluation({
+      id: evaluationId,
+      reportId: report.id,
+      judgeId: "judge-1",
+      criteriaScores: [],
+      totalScore: 55,
+      overallComment: "",
+      status: "submitted",
+      updatedAt: new Date(0).toISOString(),
+    });
+
+    const findNotice = () =>
+      useAppStore
+        .getState()
+        .notifications.find((n) => n.userId === "contestant-1" && n.body?.includes(report.title));
+    expect(findNotice()).toBeUndefined();
+    expect(
+      useAppStore.getState().evaluations.find((e) => e.id === evaluationId)?.visibleToContestant,
+    ).toBeFalsy();
+
+    useAppStore.getState().approveEvaluation(evaluationId);
+
+    expect(findNotice()).toBeDefined();
+    expect(
+      useAppStore.getState().evaluations.find((e) => e.id === evaluationId)?.visibleToContestant,
+    ).toBe(true);
+  });
+
+  it("releases every pending evaluation in a category at once", () => {
+    const reportA = useAppStore.getState().addReport({
+      contestantId: "contestant-1",
+      categoryId: "cat-yz",
+      title: "Kategori yayını A",
+      fileName: "a.pdf",
+      fileSizeBytes: 1000,
+      pdfUrl: "blob:test",
+    });
+    const reportB = useAppStore.getState().addReport({
+      contestantId: "contestant-1",
+      categoryId: "cat-yz",
+      title: "Kategori yayını B",
+      fileName: "b.pdf",
+      fileSizeBytes: 1000,
+      pdfUrl: "blob:test",
+    });
+    useAppStore.getState().assignReports([reportA.id, reportB.id], "judge-1");
+
+    for (const report of [reportA, reportB]) {
+      useAppStore.getState().saveEvaluation({
+        id: `eval-${report.id}-judge-1`,
+        reportId: report.id,
+        judgeId: "judge-1",
+        criteriaScores: [],
+        totalScore: 70,
+        overallComment: "",
+        status: "submitted",
+        updatedAt: new Date(0).toISOString(),
+      });
+    }
+
+    useAppStore.getState().releaseCategoryResults("cat-yz");
+
+    const evaluations = useAppStore.getState().evaluations;
+    expect(evaluations.find((e) => e.id === `eval-${reportA.id}-judge-1`)?.visibleToContestant).toBe(
+      true,
+    );
+    expect(evaluations.find((e) => e.id === `eval-${reportB.id}-judge-1`)?.visibleToContestant).toBe(
+      true,
+    );
+    expect(
+      useAppStore.getState().categories.find((c) => c.id === "cat-yz")?.resultsReleasedAt,
+    ).toBeTruthy();
+  });
+
+  it("auto-releases a category once its scheduled date has passed", () => {
+    const report = useAppStore.getState().addReport({
+      contestantId: "contestant-1",
+      categoryId: "cat-siber",
+      title: "Zamanlanmış yayın raporu",
+      fileName: "scheduled.pdf",
+      fileSizeBytes: 1000,
+      pdfUrl: "blob:test",
+    });
+    useAppStore.getState().assignReports([report.id], "judge-1");
+    useAppStore.getState().saveEvaluation({
+      id: `eval-${report.id}-judge-1`,
+      reportId: report.id,
+      judgeId: "judge-1",
+      criteriaScores: [],
+      totalScore: 65,
+      overallComment: "",
+      status: "submitted",
+      updatedAt: new Date(0).toISOString(),
+    });
+
+    useAppStore.getState().setCategoryReleaseDate("cat-siber", new Date(0).toISOString());
+    useAppStore.getState().checkScheduledReleases();
+
+    expect(
+      useAppStore
+        .getState()
+        .evaluations.find((e) => e.id === `eval-${report.id}-judge-1`)?.visibleToContestant,
+    ).toBe(true);
+  });
+
+  it("marks a judge-application-review notification for email delivery too", () => {
+    useAppStore.getState().reviewJudgeApplication("judge-2", "approved");
+    const notice = useAppStore
+      .getState()
+      .notifications.find((n) => n.userId === "judge-2" && n.kind === "judge_application_reviewed");
+    expect(notice?.channel).toBe("in_app_and_email");
+  });
 });

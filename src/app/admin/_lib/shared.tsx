@@ -10,6 +10,7 @@ import {
   ListChecks,
   Loader2,
   Save,
+  Send,
   Trophy,
   UploadCloud,
   UserCheck,
@@ -17,6 +18,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -24,8 +26,15 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { useAppStore } from "@/store/useAppStore";
 import * as categoriesService from "@/services/categories.service";
 import type { Category, JudgeApprovalStatus, JudgeWorkStatus, ReportStatus } from "@/types";
+
+function toLocalInputValue(iso: string) {
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 
 export const WORK_STATUS_LABEL: Record<JudgeWorkStatus, string> = {
   working: "Çalışıyor",
@@ -225,6 +234,94 @@ export function DocumentDropzone({
   );
 }
 
+/**
+ * Bir kategorideki, hakemlerin bitirdiği ama admin'in henüz yayınlamadığı değerlendirmeleri
+ * gösterir. Admin ister tek seferde "Şimdi Yayınla" der, ister bir tarih planlar — o tarih
+ * geçtiğinde ResultsReleaseWatcher otomatik olarak yayınlar.
+ */
+function ResultsReleaseSection({ category }: { category: Category }) {
+  const reports = useAppStore((s) => s.reports);
+  const evaluations = useAppStore((s) => s.evaluations);
+  const [releaseAt, setReleaseAt] = useState(
+    category.resultsReleaseAt ? toLocalInputValue(category.resultsReleaseAt) : "",
+  );
+  const [savingSchedule, setSavingSchedule] = useState(false);
+  const [releasingNow, setReleasingNow] = useState(false);
+
+  const reportIdsInCategory = new Set(
+    reports.filter((r) => r.categoryId === category.id).map((r) => r.id),
+  );
+  const pendingCount = evaluations.filter(
+    (e) => reportIdsInCategory.has(e.reportId) && e.status === "submitted" && !e.visibleToContestant,
+  ).length;
+
+  async function handleSchedule(e: FormEvent) {
+    e.preventDefault();
+    setSavingSchedule(true);
+    await categoriesService.setCategoryReleaseDate(
+      category.id,
+      releaseAt ? new Date(releaseAt).toISOString() : null,
+    );
+    setSavingSchedule(false);
+    toast.success(releaseAt ? "Yayın tarihi planlandı." : "Planlanan yayın tarihi kaldırıldı.");
+  }
+
+  async function handleReleaseNow() {
+    setReleasingNow(true);
+    await categoriesService.releaseCategoryResults(category.id);
+    setReleasingNow(false);
+    toast.success("Bu kategorideki onay bekleyen sonuçlar yayınlandı.");
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <Label>Sonuç Yayını</Label>
+        <Badge variant="outline">{pendingCount} onay bekliyor</Badge>
+      </div>
+      <p className="text-sm text-muted-foreground">
+        Hakem puanlamayı bitirdiğinde sonuç otomatik olarak yarışmacıya gitmez; ya hemen
+        yayınlarsın ya da bir tarih planlarsın.
+      </p>
+
+      <form onSubmit={handleSchedule} className="flex flex-wrap items-end gap-2">
+        <div className="flex-1 space-y-1.5">
+          <Label htmlFor={`release-at-${category.id}`} className="text-sm text-muted-foreground">
+            Planlanan yayın tarihi (opsiyonel)
+          </Label>
+          <Input
+            id={`release-at-${category.id}`}
+            type="datetime-local"
+            value={releaseAt}
+            onChange={(e) => setReleaseAt(e.target.value)}
+          />
+        </div>
+        <Button type="submit" size="sm" variant="outline" disabled={savingSchedule}>
+          {savingSchedule && <Loader2 className="size-4 animate-spin" />}
+          Planla
+        </Button>
+      </form>
+
+      <Button
+        type="button"
+        size="sm"
+        className="w-full gap-1.5"
+        disabled={releasingNow || pendingCount === 0}
+        onClick={handleReleaseNow}
+      >
+        {releasingNow ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
+        {pendingCount === 0 ? "Yayınlanacak sonuç yok" : `Şimdi Yayınla (${pendingCount})`}
+      </Button>
+
+      {category.resultsReleasedAt && (
+        <p className="text-sm text-muted-foreground">
+          Son yayın: {new Date(category.resultsReleasedAt).toLocaleString("tr-TR")}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function CompetitionEditSheet({ competition }: { competition: Category }) {
   const [name, setName] = useState(competition.name);
   const [description, setDescription] = useState(competition.description ?? "");
@@ -322,6 +419,10 @@ export function CompetitionEditSheet({ competition }: { competition: Category })
             onFile={handleTemplateFile}
           />
         </div>
+
+        <Separator />
+
+        <ResultsReleaseSection category={competition} />
       </div>
     </>
   );

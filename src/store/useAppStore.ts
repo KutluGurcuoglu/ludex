@@ -280,6 +280,7 @@ const SEED_EVALUATIONS: JudgeEvaluation[] = [
     overallComment:
       "Genel olarak başarılı, teknik derinliği yüksek bir çalışma. Test verisinin genişletilmesi önerilir.",
     status: "submitted",
+    visibleToContestant: true,
     updatedAt: "2026-08-05T15:00:00.000Z",
   },
 ];
@@ -391,6 +392,10 @@ export interface AppState {
   unassignJudge: (reportId: string, judgeId: string) => void;
   saveEvaluation: (evaluation: JudgeEvaluation) => void;
   resolveDisqualification: (reportId: string, decision: "upheld" | "dismissed") => void;
+  approveEvaluation: (evaluationId: string) => void;
+  setCategoryReleaseDate: (categoryId: string, releaseAt: string | null) => void;
+  releaseCategoryResults: (categoryId: string) => void;
+  checkScheduledReleases: () => void;
 
   addCategory: (input: { name: string; description?: string }) => Category;
   updateCategory: (id: string, updates: Partial<Pick<Category, "name" | "description">>) => void;
@@ -585,6 +590,7 @@ export const useAppStore = create<AppState>()(
               title:
                 decision === "approved" ? "Hakem başvurun onaylandı" : "Hakem başvurun reddedildi",
               link: "/judge",
+              channel: "in_app_and_email",
             }),
             ...state.notifications,
           ],
@@ -723,27 +729,10 @@ export const useAppStore = create<AppState>()(
             };
           });
 
-          let notifications = state.notifications;
-          if (evaluation.status === "submitted") {
-            const report = reports.find((r) => r.id === evaluation.reportId);
-            const contestant = report
-              ? state.users.find((u) => u.id === report.contestantId)
-              : null;
-            if (report && contestant && contestant.notifyEvaluationUpdates !== false) {
-              notifications = [
-                createNotification({
-                  userId: contestant.id,
-                  kind: "evaluation_completed",
-                  title: "Raporun değerlendirildi",
-                  body: `${report.title} · ${evaluation.totalScore} puan`,
-                  link: "/contestant",
-                }),
-                ...notifications,
-              ];
-            }
-          }
-
-          return { evaluations, reports, notifications };
+          // Yarışmacıya bildirim burada gitmez: hakem bitirdiğinde sonuç henüz görünür
+          // değildir (visibleToContestant), admin onaylayana ya da kategori toplu
+          // yayınlanana kadar bekler (bkz. approveEvaluation / releaseCategoryResults).
+          return { evaluations, reports };
         });
       },
 
@@ -794,6 +783,104 @@ export const useAppStore = create<AppState>()(
               : state.notifications,
           };
         });
+      },
+
+      approveEvaluation: (evaluationId) => {
+        set((state) => {
+          const evaluation = state.evaluations.find((e) => e.id === evaluationId);
+          if (!evaluation || evaluation.status !== "submitted" || evaluation.visibleToContestant) {
+            return state;
+          }
+
+          const evaluations = state.evaluations.map((e) =>
+            e.id === evaluationId ? { ...e, visibleToContestant: true } : e,
+          );
+
+          const report = state.reports.find((r) => r.id === evaluation.reportId);
+          const contestant = report
+            ? state.users.find((u) => u.id === report.contestantId)
+            : null;
+          const shouldNotify = report && contestant && contestant.notifyEvaluationUpdates !== false;
+
+          return {
+            evaluations,
+            notifications: shouldNotify
+              ? [
+                  createNotification({
+                    userId: contestant.id,
+                    kind: "evaluation_completed",
+                    title: "Raporun değerlendirildi",
+                    body: `${report.title} · ${evaluation.totalScore} puan`,
+                    link: "/contestant",
+                  }),
+                  ...state.notifications,
+                ]
+              : state.notifications,
+          };
+        });
+      },
+
+      setCategoryReleaseDate: (categoryId, releaseAt) => {
+        set((state) => ({
+          categories: state.categories.map((c) =>
+            c.id === categoryId ? { ...c, resultsReleaseAt: releaseAt } : c,
+          ),
+        }));
+      },
+
+      releaseCategoryResults: (categoryId) => {
+        set((state) => {
+          const reportIdsInCategory = new Set(
+            state.reports.filter((r) => r.categoryId === categoryId).map((r) => r.id),
+          );
+
+          const toRelease = state.evaluations.filter(
+            (e) =>
+              reportIdsInCategory.has(e.reportId) &&
+              e.status === "submitted" &&
+              !e.visibleToContestant,
+          );
+          if (toRelease.length === 0) return state;
+
+          const evaluations = state.evaluations.map((e) =>
+            toRelease.includes(e) ? { ...e, visibleToContestant: true } : e,
+          );
+
+          const newNotifications = toRelease.flatMap((e) => {
+            const report = state.reports.find((r) => r.id === e.reportId);
+            const contestant = report
+              ? state.users.find((u) => u.id === report.contestantId)
+              : null;
+            if (!report || !contestant || contestant.notifyEvaluationUpdates === false) return [];
+            return [
+              createNotification({
+                userId: contestant.id,
+                kind: "evaluation_completed",
+                title: "Raporun değerlendirildi",
+                body: `${report.title} · ${e.totalScore} puan`,
+                link: "/contestant",
+              }),
+            ];
+          });
+
+          return {
+            evaluations,
+            categories: state.categories.map((c) =>
+              c.id === categoryId ? { ...c, resultsReleasedAt: new Date().toISOString() } : c,
+            ),
+            notifications: [...newNotifications, ...state.notifications],
+          };
+        });
+      },
+
+      /** Planlanan yayın tarihi geçmiş kategorileri bulup sonuçlarını yayınlar; bir
+       * ResultsReleaseWatcher tarafından periyodik olarak çağrılır. */
+      checkScheduledReleases: () => {
+        const now = Date.now();
+        const due = get().categories.filter(
+          (c) => c.resultsReleaseAt && new Date(c.resultsReleaseAt).getTime() <= now,
+        );
+        due.forEach((c) => get().releaseCategoryResults(c.id));
       },
 
       addCategory: ({ name, description }) => {
@@ -865,16 +952,21 @@ export const useAppStore = create<AppState>()(
               removeItem: () => {},
             },
       ),
-      version: 1,
+      version: 2,
       /**
        * v0 -> v1: Report.assignedJudgeId (tekil) -> assignedJudgeIds (dizi), ve
-       * credentials'taki düz metin şifreler SHA-256 hash'ine taşınır. Daha önce
-       * tarayıcıda kaydedilmiş veriyi kırmadan yeni şemaya geçirir.
+       * credentials'taki düz metin şifreler SHA-256 hash'ine taşınır.
+       * v1 -> v2: Sonuçlar artık admin onayı/yayınıyla görünür olur
+       * (JudgeEvaluation.visibleToContestant); bu alan eklenmeden önce zaten
+       * "submitted" olan değerlendirmeler eskiden anında görünür olduğundan,
+       * geriye dönük olarak görünür sayılır — aksi halde bir kullanıcının daha
+       * önce gördüğü bir sonuç bu güncellemeyle aniden gizlenmiş olurdu.
        */
       migrate: async (persistedState) => {
         const state = persistedState as {
           reports?: Array<Record<string, unknown>>;
           credentials?: Record<string, string>;
+          evaluations?: Array<Record<string, unknown>>;
         };
 
         if (Array.isArray(state.reports)) {
@@ -895,6 +987,14 @@ export const useAppStore = create<AppState>()(
             }),
           );
           state.credentials = Object.fromEntries(entries);
+        }
+
+        if (Array.isArray(state.evaluations)) {
+          state.evaluations = state.evaluations.map((e) =>
+            e.status === "submitted" && e.visibleToContestant === undefined
+              ? { ...e, visibleToContestant: true }
+              : e,
+          );
         }
 
         return state;
