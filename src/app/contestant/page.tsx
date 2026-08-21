@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent } 
 import Link from "next/link";
 import { toast } from "sonner";
 import {
+  CalendarClock,
   CheckCircle2,
   Clock,
   FileText,
@@ -18,6 +19,7 @@ import {
 } from "lucide-react";
 import { motion } from "motion/react";
 import { cn } from "@/lib/utils";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { RouteGuard } from "@/components/auth/route-guard";
 import { AppHeader } from "@/components/layout/app-header";
 import { ReportTimeline } from "@/components/report-timeline";
@@ -54,7 +56,7 @@ import { getEffectiveCriteria, useAppStore, useCurrentUser } from "@/store/useAp
 import * as reportsService from "@/services/reports.service";
 import * as categoriesService from "@/services/categories.service";
 import * as evaluationsService from "@/services/evaluations.service";
-import type { ReportStatus } from "@/types";
+import type { Category, ReportStatus } from "@/types";
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20 MB
 
@@ -143,6 +145,26 @@ function formatDate(iso: string) {
     month: "long",
     year: "numeric",
   });
+}
+
+/** İkisi de boşsa gönderim her zaman açıktır — bkz. admin panelindeki gönderim takvimi. */
+function isSubmissionWindowOpen(category: Pick<Category, "submissionOpensAt" | "submissionClosesAt"> | null | undefined) {
+  if (!category) return true;
+  const now = Date.now();
+  if (category.submissionOpensAt && new Date(category.submissionOpensAt).getTime() > now) return false;
+  if (category.submissionClosesAt && new Date(category.submissionClosesAt).getTime() < now) return false;
+  return true;
+}
+
+function describeSubmissionWindow(category: Pick<Category, "submissionOpensAt" | "submissionClosesAt">) {
+  const now = Date.now();
+  if (category.submissionOpensAt && new Date(category.submissionOpensAt).getTime() > now) {
+    return `Gönderim ${formatDate(category.submissionOpensAt)} tarihinde açılacak.`;
+  }
+  if (category.submissionClosesAt && new Date(category.submissionClosesAt).getTime() < now) {
+    return `Gönderim ${formatDate(category.submissionClosesAt)} tarihinde kapandı.`;
+  }
+  return "Bu kategori için gönderim şu anda kapalı.";
 }
 
 function ContestantSkeleton() {
@@ -300,7 +322,8 @@ function ContestantDashboard() {
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    if (!user || !categoryId || !title.trim() || !file) return;
+    const category = categories.find((c) => c.id === categoryId) ?? null;
+    if (!user || !categoryId || !title.trim() || !file || !isSubmissionWindowOpen(category)) return;
 
     setSubmitting(true);
     await reportsService.submitReport({
@@ -325,7 +348,9 @@ function ContestantDashboard() {
     setFileError(null);
   }
 
-  const canSubmit = Boolean(categoryId && title.trim() && file);
+  const selectedSubmitCategory = categories.find((c) => c.id === categoryId) ?? null;
+  const submissionOpen = isSubmissionWindowOpen(selectedSubmitCategory);
+  const canSubmit = Boolean(categoryId && title.trim() && file && submissionOpen);
 
   if (isLoading) {
     return (
@@ -419,8 +444,9 @@ function ContestantDashboard() {
                     </SelectTrigger>
                     <SelectContent>
                       {categories.map((c) => (
-                        <SelectItem key={c.id} value={c.id}>
+                        <SelectItem key={c.id} value={c.id} disabled={!isSubmissionWindowOpen(c)}>
                           {c.name}
+                          {!isSubmissionWindowOpen(c) && " (gönderim kapalı)"}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -498,6 +524,13 @@ function ContestantDashboard() {
 
                 {fileError && <p className="text-sm font-medium text-destructive">{fileError}</p>}
               </div>
+
+              {selectedSubmitCategory && !submissionOpen && (
+                <Alert variant="destructive">
+                  <CalendarClock className="size-4" />
+                  <AlertDescription>{describeSubmissionWindow(selectedSubmitCategory)}</AlertDescription>
+                </Alert>
+              )}
 
               <Button
                 type="submit"
