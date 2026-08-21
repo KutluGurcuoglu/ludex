@@ -592,7 +592,17 @@ export const useAppStore = create<AppState>()(
 
       setReportStatus: (reportId, status) => {
         set((state) => ({
-          reports: state.reports.map((r) => (r.id === reportId ? { ...r, status } : r)),
+          reports: state.reports.map((r) =>
+            r.id === reportId
+              ? {
+                  ...r,
+                  status,
+                  ...(status === "in_review" && !r.reviewStartedAt
+                    ? { reviewStartedAt: new Date().toISOString() }
+                    : {}),
+                }
+              : r,
+          ),
         }));
       },
 

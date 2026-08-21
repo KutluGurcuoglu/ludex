@@ -21,6 +21,7 @@ import {
 import { cn } from "@/lib/utils";
 import { RouteGuard } from "@/components/auth/route-guard";
 import { AppHeader } from "@/components/layout/app-header";
+import { ReportTimeline } from "@/components/report-timeline";
 import {
   Card,
   CardContent,
@@ -517,35 +518,39 @@ function ContestantDashboard() {
               {myReports.map((report) => {
                 const Icon = STATUS_ICON[report.status];
                 const category = categories.find((c) => c.id === report.categoryId);
+                const reportEvaluation = evaluations.find((e) => e.reportId === report.id) ?? null;
                 return (
-                  <Card key={report.id} className="py-0">
-                    <CardContent className="flex items-center justify-between gap-4 px-5 py-4">
-                      <div className="min-w-0">
-                        <p className="truncate text-base font-semibold">{report.title}</p>
-                        <p className="mt-0.5 text-sm text-muted-foreground">
-                          {category?.name ?? "Kategori"} &middot; {formatFileSize(report.fileSizeBytes)}{" "}
-                          &middot; {formatDate(report.submittedAt)}
-                        </p>
-                      </div>
-                      <div className="flex shrink-0 items-center gap-2">
-                        <Badge
-                          variant="outline"
-                          className={`gap-1 ${STATUS_BADGE_CLASS[report.status]}`}
-                        >
-                          <Icon className="size-3" />
-                          {STATUS_LABEL[report.status]}
-                        </Badge>
-                        {(report.status === "completed" || report.status === "disqualified") && (
-                          <Button
+                  <Card key={report.id}>
+                    <CardContent className="space-y-3">
+                      <div className="flex items-center justify-between gap-4">
+                        <div className="min-w-0">
+                          <p className="truncate text-base font-semibold">{report.title}</p>
+                          <p className="mt-0.5 text-sm text-muted-foreground">
+                            {category?.name ?? "Kategori"} &middot; {formatFileSize(report.fileSizeBytes)}{" "}
+                            &middot; {formatDate(report.submittedAt)}
+                          </p>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-2">
+                          <Badge
                             variant="outline"
-                            size="sm"
-                            className="transition-transform active:scale-[0.97]"
-                            onClick={() => setDetailReportId(report.id)}
+                            className={`gap-1 ${STATUS_BADGE_CLASS[report.status]}`}
                           >
-                            Ayrıntıları Göster
-                          </Button>
-                        )}
+                            <Icon className="size-3" />
+                            {STATUS_LABEL[report.status]}
+                          </Badge>
+                          {(report.status === "completed" || report.status === "disqualified") && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="transition-transform active:scale-[0.97]"
+                              onClick={() => setDetailReportId(report.id)}
+                            >
+                              Ayrıntıları Göster
+                            </Button>
+                          )}
+                        </div>
                       </div>
+                      <ReportTimeline report={report} evaluation={reportEvaluation} />
                     </CardContent>
                   </Card>
                 );
@@ -594,6 +599,10 @@ function ContestantDashboard() {
                 <DialogTitle>{detailReport.title}</DialogTitle>
                 <DialogDescription>Hakem değerlendirme sonucun</DialogDescription>
               </DialogHeader>
+
+              {detailReport && (
+                <ReportTimeline report={detailReport} evaluation={detailEvaluation} className="pb-1" />
+              )}
 
               {detailEvaluation ? (
                 <div className="space-y-5">

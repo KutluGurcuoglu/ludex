@@ -33,6 +33,7 @@ import {
 } from "@/components/ui/dialog";
 import { useAppStore } from "@/store/useAppStore";
 import * as reportsService from "@/services/reports.service";
+import { ReportTimeline } from "@/components/report-timeline";
 import type { ReportStatus } from "@/types";
 import { formatDate, formatFileSize, STATUS_BADGE_CLASS, STATUS_LABEL } from "../_lib/shared";
 
@@ -40,6 +41,7 @@ export default function AdminPoolPage() {
   const categories = useAppStore((s) => s.categories);
   const users = useAppStore((s) => s.users);
   const reports = useAppStore((s) => s.reports);
+  const evaluations = useAppStore((s) => s.evaluations);
 
   const judges = useMemo(() => users.filter((u) => u.role === "judge"), [users]);
   const approvedJudges = useMemo(
@@ -278,9 +280,17 @@ export default function AdminPoolPage() {
                         <Badge variant="outline">{category?.name ?? "—"}</Badge>
                       </TableCell>
                       <TableCell>
-                        <Badge variant="outline" className={STATUS_BADGE_CLASS[report.status]}>
-                          {STATUS_LABEL[report.status]}
-                        </Badge>
+                        <div className="space-y-1.5">
+                          <Badge variant="outline" className={STATUS_BADGE_CLASS[report.status]}>
+                            {STATUS_LABEL[report.status]}
+                          </Badge>
+                          <ReportTimeline
+                            report={report}
+                            evaluation={evaluations.find((e) => e.reportId === report.id)}
+                            compact
+                            className="w-24"
+                          />
+                        </div>
                       </TableCell>
                       <TableCell>
                         <Select

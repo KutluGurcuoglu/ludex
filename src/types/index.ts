@@ -100,6 +100,8 @@ export interface Report {
   status: ReportStatus;
   assignedJudgeId?: string;
   assignedAt?: string;
+  /** Hakem raporu ilk kez "İncelemede" durumuna aldığında damgalanır — zaman çizelgesi için. */
+  reviewStartedAt?: string;
   submittedAt: string;
 }
 
