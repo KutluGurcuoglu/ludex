@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { ReportScanVisual } from "@/components/landing/report-scan-visual";
 import { AmbientGlow } from "@/components/landing/ambient-glow";
+import { SiteFooter } from "@/components/landing/site-footer";
 import { useCurrentUser, useHasHydrated } from "@/store/useAppStore";
 import type { UserRole } from "@/types";
 
@@ -571,6 +572,8 @@ export default function LandingPage() {
           </div>
         </div>
       </section>
+
+      <SiteFooter />
     </div>
   );
 }
