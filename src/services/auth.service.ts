@@ -17,6 +17,16 @@ export async function register(
   return simulateNetworkDelay(result);
 }
 
+export function verifyEmail(code: string): Promise<ReturnType<AppState["verifyEmail"]>> {
+  const result = useAppStore.getState().verifyEmail(code);
+  return simulateNetworkDelay(result);
+}
+
+export function resendEmailVerification(): Promise<ReturnType<AppState["resendEmailVerification"]>> {
+  const result = useAppStore.getState().resendEmailVerification();
+  return simulateNetworkDelay(result);
+}
+
 export function demoLogin(role: UserRole): Promise<void> {
   useAppStore.getState().demoLogin(role);
   return simulateNetworkDelay(undefined, 400, 700);

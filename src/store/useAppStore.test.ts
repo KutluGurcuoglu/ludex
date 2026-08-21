@@ -23,19 +23,46 @@ describe("useAppStore", () => {
     expect(result.success).toBe(false);
   });
 
-  it("registers a new user and can log in with the same password afterwards", async () => {
+  it("rejects registering a phone number that already exists", async () => {
+    const result = await useAppStore.getState().register({
+      name: "Test User",
+      email: `phone-clash-${crypto.randomUUID()}@example.com`,
+      phone: "+90 500 000 00 00",
+      password: "whatever1",
+      role: "contestant",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("requires email verification before a new registration can log in", async () => {
     const email = `new-user-${crypto.randomUUID()}@example.com`;
     const registerResult = await useAppStore.getState().register({
       name: "Yeni Kullanıcı",
       email,
-      phone: "+90 500 111 22 33",
+      phone: `+90 500 ${Math.floor(100000 + Math.random() * 900000)}`,
       password: "mypassword1",
       role: "contestant",
     });
     expect(registerResult.success).toBe(true);
+    expect(registerResult.requiresVerification).toBe(true);
+    const newUserId = useAppStore.getState().users.find((u) => u.email === email)!.id;
+    expect(useAppStore.getState().currentUserId).not.toBe(newUserId);
+
+    const blockedLogin = await useAppStore.getState().login(email, "mypassword1");
+    expect(blockedLogin.success).toBe(false);
+    expect(blockedLogin.requiresVerification).toBe(true);
+
+    const wrongCode = useAppStore.getState().verifyEmail("000000");
+    expect(wrongCode.success).toBe(false);
+
+    const verifyResult = useAppStore.getState().verifyEmail(blockedLogin.code!);
+    expect(verifyResult.success).toBe(true);
+
+    const newUser = useAppStore.getState().users.find((u) => u.email === email);
+    expect(newUser?.emailVerifiedAt).toBeTruthy();
+    expect(useAppStore.getState().currentUserId).toBe(newUser?.id);
 
     useAppStore.getState().logout();
-
     const loginResult = await useAppStore.getState().login(email, "mypassword1");
     expect(loginResult.success).toBe(true);
   });

@@ -18,6 +18,10 @@ import type {
   UserRole,
 } from "@/types";
 
+function normalizePhone(phone: string) {
+  return phone.replace(/\D/g, "");
+}
+
 function createNotification(
   input: Omit<AppNotification, "id" | "createdAt" | "readAt">,
 ): AppNotification {
@@ -345,6 +349,12 @@ interface PasswordResetRequest {
   expiresAt: number;
 }
 
+interface EmailVerificationRequest {
+  userId: string;
+  code: string;
+  expiresAt: number;
+}
+
 export interface AppState {
   categories: Category[];
   scoreCriteria: ScoreCriterion[];
@@ -357,6 +367,7 @@ export interface AppState {
   supportMessages: SupportMessage[];
   currentUserId: string | null;
   passwordResetRequest: PasswordResetRequest | null;
+  emailVerificationRequest: EmailVerificationRequest | null;
 
   markNotificationRead: (id: string) => void;
   markAllNotificationsRead: (userId: string) => void;
@@ -370,14 +381,21 @@ export interface AppState {
     body?: string;
   }) => number;
 
-  login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  login: (
+    email: string,
+    password: string,
+  ) => Promise<{ success: boolean; error?: string; requiresVerification?: boolean; code?: string }>;
   register: (input: {
     name: string;
     email: string;
     phone: string;
     password: string;
     role: Extract<UserRole, "contestant" | "judge">;
-  }) => Promise<{ success: boolean; error?: string }>;
+  }) => Promise<{ success: boolean; error?: string; requiresVerification?: boolean; code?: string }>;
+  verifyEmail: (code: string) => { success: boolean; error?: string };
+  resendEmailVerification: () => { success: boolean; error?: string; code?: string };
+  /** Internal: yeni bir kod üretir, emailVerificationRequest'e yazar ve kodu döner. */
+  issueEmailVerificationCode: (userId: string) => string;
   demoLogin: (role: UserRole) => void;
   logout: () => void;
 
@@ -492,7 +510,7 @@ export const useAppStore = create<AppState>()(
       categories: CATEGORIES,
       scoreCriteria: SCORE_CRITERIA,
       faqs: SEED_FAQS,
-      users: SEED_USERS,
+      users: SEED_USERS.map((u) => ({ ...u, emailVerifiedAt: u.createdAt })),
       credentials: SEED_CREDENTIALS,
       reports: SEED_REPORTS,
       evaluations: SEED_EVALUATIONS,
@@ -500,6 +518,7 @@ export const useAppStore = create<AppState>()(
       supportMessages: [],
       currentUserId: null,
       passwordResetRequest: null,
+      emailVerificationRequest: null,
 
       login: async (email, password) => {
         const normalizedEmail = email.trim().toLowerCase();
@@ -511,16 +530,30 @@ export const useAppStore = create<AppState>()(
           return { success: false, error: "E-posta veya şifre hatalı." };
         }
 
+        if (!user.emailVerifiedAt) {
+          const code = get().issueEmailVerificationCode(user.id);
+          return {
+            success: false,
+            error: "E-posta adresini henüz doğrulamadın. Sana yeni bir kod gönderdik.",
+            requiresVerification: true,
+            code,
+          };
+        }
+
         set({ currentUserId: user.id });
         return { success: true };
       },
 
       register: async ({ name, email, phone, password, role }) => {
         const normalizedEmail = email.trim().toLowerCase();
+        const normalizedPhone = normalizePhone(phone);
         const { users } = get();
 
         if (users.some((u) => u.email.toLowerCase() === normalizedEmail)) {
           return { success: false, error: "Bu e-posta ile zaten bir hesap var." };
+        }
+        if (normalizedPhone && users.some((u) => normalizePhone(u.phone) === normalizedPhone)) {
+          return { success: false, error: "Bu telefon numarasıyla zaten bir hesap var." };
         }
 
         const newUser: User = {
@@ -531,6 +564,7 @@ export const useAppStore = create<AppState>()(
           role,
           categoryIds: [],
           createdAt: new Date().toISOString(),
+          emailVerifiedAt: null,
           ...(role === "judge" ? { judgeApprovalStatus: "pending" as const } : {}),
         };
         const hashed = await hashPassword(password);
@@ -538,7 +572,50 @@ export const useAppStore = create<AppState>()(
         set((state) => ({
           users: [...state.users, newUser],
           credentials: { ...state.credentials, [email]: hashed },
-          currentUserId: newUser.id,
+        }));
+
+        const code = get().issueEmailVerificationCode(newUser.id);
+        return { success: true, requiresVerification: true, code };
+      },
+
+      issueEmailVerificationCode: (userId) => {
+        const code = Math.floor(100000 + Math.random() * 900000).toString();
+        set({
+          emailVerificationRequest: { userId, code, expiresAt: Date.now() + 10 * 60 * 1000 },
+        });
+        return code;
+      },
+
+      resendEmailVerification: () => {
+        const pending = get().emailVerificationRequest;
+        if (!pending) {
+          return { success: false, error: "Bekleyen bir doğrulama isteği yok." };
+        }
+        const code = get().issueEmailVerificationCode(pending.userId);
+        return { success: true, code };
+      },
+
+      verifyEmail: (code) => {
+        const request = get().emailVerificationRequest;
+
+        if (!request || request.expiresAt < Date.now()) {
+          return { success: false, error: "Kodun süresi doldu, lütfen tekrar isteyin." };
+        }
+        if (request.code !== code.trim()) {
+          return { success: false, error: "Girdiğiniz kod hatalı." };
+        }
+
+        const user = get().users.find((u) => u.id === request.userId);
+        if (!user) {
+          return { success: false, error: "Kullanıcı bulunamadı." };
+        }
+
+        set((state) => ({
+          users: state.users.map((u) =>
+            u.id === user.id ? { ...u, emailVerifiedAt: new Date().toISOString() } : u,
+          ),
+          emailVerificationRequest: null,
+          currentUserId: user.id,
         }));
 
         return { success: true };
@@ -1221,7 +1298,7 @@ export const useAppStore = create<AppState>()(
               removeItem: () => {},
             },
       ),
-      version: 2,
+      version: 3,
       /**
        * v0 -> v1: Report.assignedJudgeId (tekil) -> assignedJudgeIds (dizi), ve
        * credentials'taki düz metin şifreler SHA-256 hash'ine taşınır.
@@ -1230,13 +1307,23 @@ export const useAppStore = create<AppState>()(
        * "submitted" olan değerlendirmeler eskiden anında görünür olduğundan,
        * geriye dönük olarak görünür sayılır — aksi halde bir kullanıcının daha
        * önce gördüğü bir sonuç bu güncellemeyle aniden gizlenmiş olurdu.
+       * v2 -> v3: E-posta doğrulaması zorunlu hale geldi (User.emailVerifiedAt);
+       * bu alan eklenmeden önce kayıt olmuş kullanıcılar geriye dönük olarak
+       * doğrulanmış sayılır — aksi halde mevcut hesaplar aniden giriş yapamaz olurdu.
        */
       migrate: async (persistedState) => {
         const state = persistedState as {
           reports?: Array<Record<string, unknown>>;
           credentials?: Record<string, string>;
           evaluations?: Array<Record<string, unknown>>;
+          users?: Array<Record<string, unknown>>;
         };
+
+        if (Array.isArray(state.users)) {
+          state.users = state.users.map((u) =>
+            u.emailVerifiedAt === undefined ? { ...u, emailVerifiedAt: u.createdAt } : u,
+          );
+        }
 
         if (Array.isArray(state.reports)) {
           state.reports = state.reports.map((r) => {

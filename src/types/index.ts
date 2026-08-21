@@ -42,6 +42,8 @@ export interface User {
   /** contestant: tek kategori (ilk eleman) · judge: uzmanlık alanları (çoklu) */
   categoryIds: string[];
   createdAt: string;
+  /** E-posta doğrulaması tamamlandığında set edilir; kayıt zorunlu olarak bunu bekler. */
+  emailVerifiedAt?: string | null;
 
   // Kişisel bilgiler
   isTurkishCitizen?: boolean;
