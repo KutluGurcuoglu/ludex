@@ -13,10 +13,18 @@ import { Separator } from "@/components/ui/separator";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useSession } from "next-auth/react";
 import { ForgotPasswordDialog } from "@/components/auth/forgot-password-dialog";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { AmbientGlow } from "@/components/landing/ambient-glow";
-import { useAppStore, useCurrentUser, useHasHydrated } from "@/store/useAppStore";
+import { useCurrentUser, useHasHydrated } from "@/store/useAppStore";
+import {
+  login,
+  register,
+  verifyEmail,
+  resendEmailVerification,
+  demoLogin,
+} from "@/services/auth.service";
 import type { UserRole } from "@/types";
 
 const DASHBOARD_PATH: Record<UserRole, string> = {
@@ -28,18 +36,15 @@ const DASHBOARD_PATH: Record<UserRole, string> = {
 export default function LoginPage() {
   const router = useRouter();
   const hydrated = useHasHydrated();
+  const { status: sessionStatus } = useSession();
   const currentUser = useCurrentUser();
-  const login = useAppStore((s) => s.login);
-  const register = useAppStore((s) => s.register);
-  const verifyEmail = useAppStore((s) => s.verifyEmail);
-  const resendEmailVerification = useAppStore((s) => s.resendEmailVerification);
-  const demoLogin = useAppStore((s) => s.demoLogin);
+  const ready = hydrated && sessionStatus !== "loading";
 
   useEffect(() => {
-    if (hydrated && currentUser) {
+    if (ready && currentUser) {
       router.replace(DASHBOARD_PATH[currentUser.role]);
     }
-  }, [hydrated, currentUser, router]);
+  }, [ready, currentUser, router]);
 
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
@@ -80,12 +85,16 @@ export default function LoginPage() {
       setRegisterError(result.error ?? "Kayıt başarısız.");
       return;
     }
+    // Gerçek kayıt e-posta doğrulaması istemez ve otomatik oturum açar — bu
+    // ekran yalnızca (mock'tan kalma) result.code/requiresVerification varsa gösterilir.
     if (result.code) {
       toast.info(`Demo doğrulama kodu: ${result.code}`, {
         description: "Gerçek sistemde bu kod e-postana gönderilir.",
       });
     }
-    setAwaitingVerification(true);
+    if (result.code || result.requiresVerification) {
+      setAwaitingVerification(true);
+    }
   }
 
   async function handleVerify(e: FormEvent) {
@@ -111,7 +120,7 @@ export default function LoginPage() {
     }
   }
 
-  if (!hydrated || currentUser) {
+  if (!ready || currentUser) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <div className="size-8 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-foreground" />

@@ -43,6 +43,24 @@ export interface CategoryRecord extends Category {
   evaluationCriteria: CategoryEvaluationCriterion[];
 }
 
+/**
+ * Bir kategorinin rapor gönderim penceresinin şu an açık olup olmadığını
+ * hesaplar. İkisi de tanımlı değilse gönderim her zaman açıktır (frontend'in
+ * benimsediği aynı fallback kuralı — bkz. ekip aktarım notları).
+ */
+export function isSubmissionWindowOpen(
+  category: Pick<Category, "submissionOpensAt" | "submissionClosesAt">,
+  now: Date = new Date()
+): boolean {
+  if (category.submissionOpensAt && now < new Date(category.submissionOpensAt)) {
+    return false;
+  }
+  if (category.submissionClosesAt && now > new Date(category.submissionClosesAt)) {
+    return false;
+  }
+  return true;
+}
+
 export interface CreateCategoryInput {
   name: string;
   description?: string;
@@ -73,6 +91,10 @@ export interface CategoryRepository {
   setEvaluationCriteria(
     id: string,
     criteria: Array<{ name: string; description: string; maxScore?: number }>
+  ): Promise<CategoryRecord | null>;
+  setSubmissionWindow(
+    id: string,
+    window: { opensAt: string | null; closesAt: string | null }
   ): Promise<CategoryRecord | null>;
 }
 
@@ -199,6 +221,22 @@ class InMemoryCategoryRepository implements CategoryRepository {
         description: criterion.description,
         maxScore: criterion.maxScore,
       })),
+    };
+    this.categoriesById.set(id, updated);
+    return updated;
+  }
+
+  async setSubmissionWindow(
+    id: string,
+    window: { opensAt: string | null; closesAt: string | null }
+  ): Promise<CategoryRecord | null> {
+    const category = this.categoriesById.get(id);
+    if (!category) return null;
+
+    const updated: CategoryRecord = {
+      ...category,
+      submissionOpensAt: window.opensAt,
+      submissionClosesAt: window.closesAt,
     };
     this.categoriesById.set(id, updated);
     return updated;

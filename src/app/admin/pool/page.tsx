@@ -179,17 +179,26 @@ export default function AdminPoolPage() {
   async function confirmAssign() {
     if (!pendingAssignment) return;
     setAssigning(true);
-    await reportsService.assignReports(pendingAssignment.reportIds, pendingAssignment.judgeId);
-    setAssigning(false);
-    const judge = judges.find((j) => j.id === pendingAssignment.judgeId);
-    toast.success(`${pendingAssignment.label} ${judge?.name ?? "hakeme"} atandı.`);
-    setPendingAssignment(null);
-    setSelectedIds([]);
-    setBulkJudgeId("");
+    try {
+      await reportsService.assignReports(pendingAssignment.reportIds, pendingAssignment.judgeId);
+      const judge = judges.find((j) => j.id === pendingAssignment.judgeId);
+      toast.success(`${pendingAssignment.label} ${judge?.name ?? "hakeme"} atandı.`);
+      setPendingAssignment(null);
+      setSelectedIds([]);
+      setBulkJudgeId("");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Atama başarısız oldu.");
+    } finally {
+      setAssigning(false);
+    }
   }
 
   async function handleUnassign(reportId: string, judgeId: string) {
-    await reportsService.unassignJudge(reportId, judgeId);
+    try {
+      await reportsService.unassignJudge(reportId, judgeId);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Atama kaldırılamadı.");
+    }
   }
 
   async function handleAutoAssign() {
@@ -226,9 +235,14 @@ export default function AdminPoolPage() {
       loadMap.set(chosen.id, (loadMap.get(chosen.id) ?? 0) + 1);
     });
 
-    await Promise.all(assignments);
-    setAutoAssigning(false);
-    toast.success(`${assignments.length} rapor otomatik olarak atandı.`);
+    try {
+      await Promise.all(assignments);
+      toast.success(`${assignments.length} rapor otomatik olarak atandı.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Otomatik atama başarısız oldu.");
+    } finally {
+      setAutoAssigning(false);
+    }
   }
 
   return (

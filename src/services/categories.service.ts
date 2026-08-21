@@ -2,23 +2,39 @@ import { useAppStore, type AppState } from "@/store/useAppStore";
 import type { Category, CompetitionDocument, ScoreCriterion } from "@/types";
 import { simulateNetworkDelay } from "./delay";
 
-export function getCategories(): Promise<Category[]> {
-  return simulateNetworkDelay(useAppStore.getState().categories);
+export async function getCategories(): Promise<Category[]> {
+  const res = await fetch("/api/categories");
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error ?? "Kategoriler alınamadı.");
+  return data.categories;
 }
 
-export function createCategory(
+export async function createCategory(
   input: Parameters<AppState["addCategory"]>[0],
 ): Promise<Category> {
-  const created = useAppStore.getState().addCategory(input);
-  return simulateNetworkDelay(created);
+  const res = await fetch("/api/categories", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error ?? "Kategori oluşturulamadı.");
+  return data.category;
 }
 
-export function updateCategory(
+export async function updateCategory(
   id: string,
   updates: Parameters<AppState["updateCategory"]>[1],
 ): Promise<void> {
-  useAppStore.getState().updateCategory(id, updates);
-  return simulateNetworkDelay(undefined);
+  const res = await fetch(`/api/categories/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(updates),
+  });
+  if (!res.ok) {
+    const data = await res.json();
+    throw new Error(data.error ?? "Kategori güncellenemedi.");
+  }
 }
 
 export function uploadCategorySpecification(
@@ -77,11 +93,18 @@ export function deleteCategoryCriterion(categoryId: string, criterionId: string)
   return simulateNetworkDelay(undefined);
 }
 
-export function setCategorySubmissionWindow(
+export async function setCategorySubmissionWindow(
   id: string,
   opensAt: string | null,
   closesAt: string | null,
 ): Promise<void> {
-  useAppStore.getState().setCategorySubmissionWindow(id, opensAt, closesAt);
-  return simulateNetworkDelay(undefined);
+  const res = await fetch(`/api/categories/${id}/submission-window`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ opensAt, closesAt }),
+  });
+  if (!res.ok) {
+    const data = await res.json();
+    throw new Error(data.error ?? "Gönderim penceresi güncellenemedi.");
+  }
 }

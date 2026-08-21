@@ -22,7 +22,7 @@ export async function POST(
   }
 
   // Hakem yalnızca kendisine atanmış raporu değerlendirebilir; admin her raporu tetikleyebilir.
-  if (session.user.role === "judge" && report.assignedJudgeId !== session.user.id) {
+  if (session.user.role === "judge" && !report.assignedJudgeIds.includes(session.user.id)) {
     return NextResponse.json({ error: "Bu rapor size atanmamış." }, { status: 403 });
   }
 

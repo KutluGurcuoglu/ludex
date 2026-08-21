@@ -1,9 +1,12 @@
 import { NextResponse } from "next/server";
-import { HeadObjectCommand } from "@aws-sdk/client-s3";
+import { GetObjectCommand, HeadObjectCommand } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { z } from "zod";
 import { auth } from "@/auth";
 import { getR2Client, getR2BucketName } from "@/lib/storage/r2-client";
-import { getReportRepository } from "@/lib/repositories/report-repository";
+import { getReportRepository, type ReportRecord } from "@/lib/repositories/report-repository";
+import { getCategoryRepository, isSubmissionWindowOpen } from "@/lib/repositories/category-repository";
+import { getUserRepository } from "@/lib/repositories/user-repository";
 import { getTextExtractor } from "@/lib/text-extraction";
 
 // LlamaParse gerçek modda çalıştığında iş birkaç dakika sürebilir; Vercel
@@ -12,6 +15,8 @@ import { getTextExtractor } from "@/lib/text-extraction";
 // — production'a geçmeden önce bu adımın arka plana (kuyruk / webhook) taşınması
 // gerekir; şimdilik hackathon kapsamında senkron kabul ediyoruz.
 export const maxDuration = 60;
+
+const PDF_VIEW_URL_EXPIRY_SECONDS = 60 * 60; // 1 saat — hakem/yarışmacı raporu incelerken yeterli
 
 const createReportSchema = z.object({
   title: z.string().trim().min(1).max(300),
@@ -22,6 +27,42 @@ const createReportSchema = z.object({
     .regex(/^pdfs\/[a-zA-Z0-9-]+\.pdf$/, "Geçersiz dosya anahtarı."),
   fileName: z.string().trim().min(1).max(255),
 });
+
+/**
+ * Backend'in dahili ReportRecord'unu (r2Key, extractedText gibi iç alanlar
+ * içerir) frontend'in beklediği Report şekline dönüştürür: r2Key yerine
+ * geçici bir görüntüleme URL'i (R2 nesneleri public değildir), contestantId
+ * yerine ayrıca çözümlenmiş contestantName eklenir. AI değerlendirmesi
+ * yalnızca includeAiEvaluation true ise dahil edilir (bkz. requireRole
+ * kontrolleri — yarışmacıya asla true geçilmemeli).
+ */
+async function toApiReport(report: ReportRecord, includeAiEvaluation: boolean) {
+  const [contestant, pdfUrl] = await Promise.all([
+    getUserRepository().findById(report.contestantId),
+    getSignedUrl(
+      getR2Client(),
+      new GetObjectCommand({ Bucket: getR2BucketName(), Key: report.r2Key }),
+      { expiresIn: PDF_VIEW_URL_EXPIRY_SECONDS }
+    ),
+  ]);
+
+  const base = {
+    id: report.id,
+    title: report.title,
+    contestantId: report.contestantId,
+    contestantName: contestant?.name ?? "Bilinmeyen",
+    categoryId: report.categoryId,
+    fileName: report.fileName,
+    fileSizeBytes: report.fileSizeBytes,
+    pdfUrl,
+    status: report.status,
+    assignedJudgeIds: report.assignedJudgeIds,
+    assignedAt: report.assignedAt,
+    submittedAt: report.submittedAt,
+  };
+
+  return includeAiEvaluation ? { ...base, aiEvaluation: report.aiEvaluation } : base;
+}
 
 export async function POST(req: Request) {
   const session = await auth();
@@ -45,6 +86,20 @@ export async function POST(req: Request) {
   }
 
   const { title, categoryId, r2Key, fileName } = parsed.data;
+
+  // Gönderim penceresi yalnızca frontend'de değil, burada da zorunlu kılınmalı —
+  // aksi halde API'ye doğrudan istek atılarak pencere dışı gönderim yapılabilir
+  // (bkz. ekip aktarım notları, "Gönderim penceresi zorunluluğu").
+  const category = await getCategoryRepository().findById(categoryId);
+  if (!category) {
+    return NextResponse.json({ error: "Kategori bulunamadı." }, { status: 404 });
+  }
+  if (!isSubmissionWindowOpen(category)) {
+    return NextResponse.json(
+      { error: "Bu kategori için rapor gönderim penceresi şu anda kapalı." },
+      { status: 403 }
+    );
+  }
 
   // Rapor kaydı yalnızca dosya gerçekten R2'ye yüklenmişse oluşturulur —
   // aksi halde arka planda hiç PDF'i olmayan "hayalet" raporlar birikir.
@@ -87,7 +142,9 @@ export async function POST(req: Request) {
   }
 
   const updatedReport = await reportRepository.findById(report.id);
-  return NextResponse.json({ success: true, report: updatedReport }, { status: 201 });
+  // Yarışmacıya AI değerlendirmesi asla dönmemeli.
+  const responseReport = updatedReport ? await toApiReport(updatedReport, false) : null;
+  return NextResponse.json({ success: true, report: responseReport }, { status: 201 });
 }
 
 export async function GET() {
@@ -99,12 +156,15 @@ export async function GET() {
   const reportRepository = getReportRepository();
   const { role, id } = session.user;
 
-  const reports =
+  const records =
     role === "admin"
       ? await reportRepository.listAll()
       : role === "judge"
         ? await reportRepository.listByJudge(id)
         : await reportRepository.listByContestant(id);
 
+  // Yarışmacıya AI değerlendirmesi asla dönmemeli; admin/hakem görebilir.
+  const includeAiEvaluation = role !== "contestant";
+  const reports = await Promise.all(records.map((r) => toApiReport(r, includeAiEvaluation)));
   return NextResponse.json({ reports });
 }

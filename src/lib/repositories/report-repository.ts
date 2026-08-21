@@ -12,7 +12,8 @@ export interface ReportRecord {
   status: ReportStatus;
   extractedText: string | null;
   aiEvaluation: EvaluationOutput | null;
-  assignedJudgeId?: string;
+  /** Bir rapora birden fazla hakem atanabilir (bkz. ekip aktarım notları — çoklu hakem/kalibrasyon). */
+  assignedJudgeIds: string[];
   assignedAt?: string;
   submittedAt: string;
 }
@@ -31,6 +32,13 @@ export interface CreateReportInput {
  * şu an in-memory, feat/database-foundation'daki Prisma şeması hazır
  * olunca bu arayüzü değiştirmeden Prisma tabanlı bir implementasyonla
  * değiştireceğiz.
+ *
+ * NOT: status alanı şu an yalnızca atama sayısına göre türetiliyor
+ * (hiç hakem yok -> pending_assignment, en az bir hakem var -> assigned).
+ * Ekip aktarım notlarındaki tam türetme kuralı (in_review/completed/disqualified)
+ * hakem değerlendirme gönderimi (POST /reports/:id/evaluations) inşa edilmeden
+ * doğru şekilde uygulanamaz — o uç henüz yok, bu yüzden buraya yarım/yanlış bir
+ * mantık eklenmedi.
  */
 export interface ReportRepository {
   create(input: CreateReportInput): Promise<ReportRecord>;
@@ -39,7 +47,8 @@ export interface ReportRepository {
   listByContestant(contestantId: string): Promise<ReportRecord[]>;
   listByJudge(judgeId: string): Promise<ReportRecord[]>;
   setExtractedText(id: string, text: string | null): Promise<void>;
-  assign(id: string, judgeId: string): Promise<ReportRecord | null>;
+  assignJudge(id: string, judgeId: string): Promise<ReportRecord | null>;
+  unassignJudge(id: string, judgeId: string): Promise<ReportRecord | null>;
   setAiEvaluation(id: string, evaluation: EvaluationOutput): Promise<void>;
   setStatus(id: string, status: ReportStatus): Promise<void>;
 }
@@ -59,6 +68,7 @@ class InMemoryReportRepository implements ReportRepository {
       status: "pending_assignment",
       extractedText: null,
       aiEvaluation: null,
+      assignedJudgeIds: [],
       submittedAt: new Date().toISOString(),
     };
     this.reportsById.set(report.id, report);
@@ -80,8 +90,8 @@ class InMemoryReportRepository implements ReportRepository {
   }
 
   async listByJudge(judgeId: string): Promise<ReportRecord[]> {
-    return Array.from(this.reportsById.values()).filter(
-      (r) => r.assignedJudgeId === judgeId
+    return Array.from(this.reportsById.values()).filter((r) =>
+      r.assignedJudgeIds.includes(judgeId)
     );
   }
 
@@ -90,13 +100,28 @@ class InMemoryReportRepository implements ReportRepository {
     if (report) report.extractedText = text;
   }
 
-  async assign(id: string, judgeId: string): Promise<ReportRecord | null> {
+  async assignJudge(id: string, judgeId: string): Promise<ReportRecord | null> {
     const report = this.reportsById.get(id);
     if (!report) return null;
 
-    report.assignedJudgeId = judgeId;
+    if (!report.assignedJudgeIds.includes(judgeId)) {
+      report.assignedJudgeIds.push(judgeId);
+    }
     report.assignedAt = new Date().toISOString();
-    report.status = "assigned";
+    if (report.status === "pending_assignment") {
+      report.status = "assigned";
+    }
+    return report;
+  }
+
+  async unassignJudge(id: string, judgeId: string): Promise<ReportRecord | null> {
+    const report = this.reportsById.get(id);
+    if (!report) return null;
+
+    report.assignedJudgeIds = report.assignedJudgeIds.filter((j) => j !== judgeId);
+    if (report.assignedJudgeIds.length === 0 && report.status === "assigned") {
+      report.status = "pending_assignment";
+    }
     return report;
   }
 

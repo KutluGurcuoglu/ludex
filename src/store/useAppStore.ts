@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useSession } from "next-auth/react";
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { hashPassword } from "@/lib/hash";
@@ -1516,8 +1517,34 @@ export function getEffectiveCriteria(
   return category?.criteria && category.criteria.length > 0 ? category.criteria : globalCriteria;
 }
 
-export const useCurrentUser = () =>
-  useAppStore((state) => state.users.find((u) => u.id === state.currentUserId) ?? null);
+/**
+ * Önce demoLogin ile ayarlanmış mock kullanıcıyı kontrol eder (geriye dönük
+ * uyumluluk için); yoksa gerçek NextAuth oturumundan minimal bir User nesnesi
+ * türetir. Gerçek oturumda yalnızca id/name/email/role bulunur — telefon,
+ * adres, hakem onay durumu gibi genişletilmiş profil alanları henüz backend'de
+ * yok (bilinen takip maddesi, bkz. proje notları); bu alanlar gerçek oturumlu
+ * kullanıcılar için boş/varsayılan döner.
+ */
+export const useCurrentUser = (): User | null => {
+  const mockUser = useAppStore((state) =>
+    state.users.find((u) => u.id === state.currentUserId) ?? null,
+  );
+  const { data: session } = useSession();
+
+  if (mockUser) return mockUser;
+  if (session?.user) {
+    return {
+      id: session.user.id,
+      name: session.user.name ?? "",
+      email: session.user.email ?? "",
+      phone: "",
+      role: session.user.role,
+      categoryIds: [],
+      createdAt: "",
+    };
+  }
+  return null;
+};
 
 /**
  * localStorage'dan rehydrate tamamlanana kadar false döner; SSR/CSR uyumsuzluğunu önler.

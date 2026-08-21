@@ -326,26 +326,20 @@ function ContestantDashboard() {
     if (!user || !categoryId || !title.trim() || !file || !isSubmissionWindowOpen(category)) return;
 
     setSubmitting(true);
-    await reportsService.submitReport({
-      contestantId: user.id,
-      categoryId,
-      title: title.trim(),
-      fileName: file.name,
-      fileSizeBytes: file.size,
-      // Gerçek dosya içeriğini gösterir; bu blob URL sadece bu tarayıcı sekmesinde ve
-      // sayfa yenilenene kadar geçerlidir (backend'e taşınınca gerçek bir dosya URL'i olacak).
-      pdfUrl: URL.createObjectURL(file),
-    });
-    setSubmitting(false);
-
-    toast.success("Raporun başarıyla gönderildi.", {
-      description: "Admin tarafından bir hakeme atandığında durumunu buradan takip edebilirsin.",
-    });
-
-    setCategoryId("");
-    setTitle("");
-    setFile(null);
-    setFileError(null);
+    try {
+      await reportsService.submitReport({ categoryId, title: title.trim(), file });
+      toast.success("Raporun başarıyla gönderildi.", {
+        description: "Admin tarafından bir hakeme atandığında durumunu buradan takip edebilirsin.",
+      });
+      setCategoryId("");
+      setTitle("");
+      setFile(null);
+      setFileError(null);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Rapor gönderilemedi.");
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   const selectedSubmitCategory = categories.find((c) => c.id === categoryId) ?? null;

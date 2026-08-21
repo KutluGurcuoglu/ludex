@@ -8,7 +8,8 @@ const assignSchema = z.object({
   judgeId: z.string().trim().min(1),
 });
 
-export async function PATCH(
+/** Bir rapora hakem ekler. Zaten atanmışsa no-op olarak başarı döner (idempotent). */
+export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -39,7 +40,7 @@ export async function PATCH(
     return NextResponse.json({ error: "Geçerli bir hakem bulunamadı." }, { status: 400 });
   }
 
-  const report = await getReportRepository().assign(id, judge.id);
+  const report = await getReportRepository().assignJudge(id, judge.id);
   if (!report) {
     return NextResponse.json({ error: "Rapor bulunamadı." }, { status: 404 });
   }

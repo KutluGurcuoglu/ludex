@@ -18,11 +18,11 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { useAppStore, useCurrentUser } from "@/store/useAppStore";
+import { useCurrentUser } from "@/store/useAppStore";
+import { logout } from "@/services/auth.service";
 
 export function AppHeader({}: { subtitle?: string } = {}) {
   const user = useCurrentUser();
-  const logout = useAppStore((s) => s.logout);
   const router = useRouter();
   const [confirmOpen, setConfirmOpen] = useState(false);
 
@@ -80,8 +80,8 @@ export function AppHeader({}: { subtitle?: string } = {}) {
           <AlertDialogFooter>
             <AlertDialogCancel onClick={() => setConfirmOpen(false)}>Vazgeç</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => {
-                logout();
+              onClick={async () => {
+                await logout();
                 router.replace("/login");
               }}
             >
