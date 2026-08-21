@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { Bell } from "lucide-react";
+import { Bell, Mail } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -94,7 +94,15 @@ export function NotificationBell() {
                     )}
                   />
                   <div className="min-w-0">
-                    <p className="font-medium">{n.title}</p>
+                    <p className="flex items-center gap-1 font-medium">
+                      {n.title}
+                      {n.channel === "in_app_and_email" && (
+                        <Mail
+                          className="size-3 shrink-0 text-muted-foreground"
+                          aria-label="E-posta olarak da gönderildi"
+                        />
+                      )}
+                    </p>
                     {n.body && <p className="truncate text-muted-foreground">{n.body}</p>}
                     <p className="mt-0.5 text-xs text-muted-foreground">{timeAgo(n.createdAt)}</p>
                   </div>
