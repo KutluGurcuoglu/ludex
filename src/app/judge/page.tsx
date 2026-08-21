@@ -248,6 +248,7 @@ function StepIndicator({ step }: { step: ApplicationStep }) {
 
 function JudgeApplicationForm({ user, categories }: { user: User; categories: Category[] }) {
   const router = useRouter();
+  const logout = useAppStore((s) => s.logout);
 
   const [step, setStep] = useState<ApplicationStep>(1);
 
@@ -358,7 +359,10 @@ function JudgeApplicationForm({ user, categories }: { user: User; categories: Ca
         variant="ghost"
         size="sm"
         className="mb-4 -ml-2 gap-1.5"
-        onClick={() => router.back()}
+        onClick={() => {
+          logout();
+          router.replace("/login");
+        }}
       >
         <ArrowLeft className="size-4" />
         Geri Dön
