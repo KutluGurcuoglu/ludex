@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { useAppStore } from "@/store/useAppStore";
 import * as supportService from "@/services/support.service";
+import { useViewMode } from "../_lib/shared";
 
 const ROLE_LABEL: Record<string, string> = {
   admin: "Yönetici",
@@ -27,6 +28,7 @@ function formatDate(iso: string) {
 
 export default function AdminSupportPage() {
   const supportMessages = useAppStore((s) => s.supportMessages);
+  const { viewMode } = useViewMode();
   const [resolvingId, setResolvingId] = useState<string | null>(null);
 
   const { pending, resolved } = useMemo(() => {
@@ -57,51 +59,93 @@ export default function AdminSupportPage() {
           Bekleyen destek talebi yok.
         </p>
       ) : (
-        <div className="space-y-3">
-          {pending.map((m) => (
-            <Card key={m.id} className="border-amber-300 dark:border-amber-900">
-              <CardContent className="space-y-3 pt-6">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex items-center gap-3">
+        <div className={viewMode === "grid" ? "grid gap-4 sm:grid-cols-2 lg:grid-cols-3" : "space-y-2"}>
+          {pending.map((m) => {
+            if (viewMode === "list") {
+              return (
+                <Card key={m.id} className="border-amber-300 py-0 dark:border-amber-900">
+                  <CardContent className="flex flex-wrap items-center gap-4 px-5 py-4">
                     <Avatar>
                       <AvatarFallback>{m.userName.slice(0, 2).toUpperCase()}</AvatarFallback>
                     </Avatar>
-                    <div>
-                      <p className="text-base font-semibold">{m.userName}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {ROLE_LABEL[m.userRole] ?? m.userRole} &middot; {formatDate(m.createdAt)}
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-base font-semibold">{m.subject}</p>
+                      <p className="truncate text-sm text-muted-foreground">
+                        {m.userName} ({ROLE_LABEL[m.userRole] ?? m.userRole}) &middot;{" "}
+                        {formatDate(m.createdAt)} &middot; {m.message}
                       </p>
                     </div>
+                    <Badge
+                      variant="outline"
+                      className="shrink-0 border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300"
+                    >
+                      <LifeBuoy className="mr-1 size-3" />
+                      Bekliyor
+                    </Badge>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={resolvingId === m.id}
+                      className="shrink-0 gap-1.5"
+                      onClick={() => handleResolve(m.id)}
+                    >
+                      {resolvingId === m.id ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : (
+                        <CheckCircle2 className="size-4" />
+                      )}
+                      Çözüldü
+                    </Button>
+                  </CardContent>
+                </Card>
+              );
+            }
+
+            return (
+              <Card key={m.id} className="border-amber-300 dark:border-amber-900">
+                <CardContent className="space-y-3 pt-6">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-3">
+                      <Avatar>
+                        <AvatarFallback>{m.userName.slice(0, 2).toUpperCase()}</AvatarFallback>
+                      </Avatar>
+                      <div>
+                        <p className="text-base font-semibold">{m.userName}</p>
+                        <p className="text-sm text-muted-foreground">
+                          {ROLE_LABEL[m.userRole] ?? m.userRole} &middot; {formatDate(m.createdAt)}
+                        </p>
+                      </div>
+                    </div>
+                    <Badge
+                      variant="outline"
+                      className="border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300"
+                    >
+                      <LifeBuoy className="mr-1 size-3" />
+                      Bekliyor
+                    </Badge>
                   </div>
-                  <Badge
+                  <div>
+                    <p className="text-base font-medium">{m.subject}</p>
+                    <p className="mt-1 text-base text-muted-foreground">{m.message}</p>
+                  </div>
+                  <Button
+                    size="sm"
                     variant="outline"
-                    className="border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300"
+                    disabled={resolvingId === m.id}
+                    className="gap-1.5"
+                    onClick={() => handleResolve(m.id)}
                   >
-                    <LifeBuoy className="mr-1 size-3" />
-                    Bekliyor
-                  </Badge>
-                </div>
-                <div>
-                  <p className="text-base font-medium">{m.subject}</p>
-                  <p className="mt-1 text-base text-muted-foreground">{m.message}</p>
-                </div>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={resolvingId === m.id}
-                  className="gap-1.5"
-                  onClick={() => handleResolve(m.id)}
-                >
-                  {resolvingId === m.id ? (
-                    <Loader2 className="size-4 animate-spin" />
-                  ) : (
-                    <CheckCircle2 className="size-4" />
-                  )}
-                  Çözüldü Olarak İşaretle
-                </Button>
-              </CardContent>
-            </Card>
-          ))}
+                    {resolvingId === m.id ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <CheckCircle2 className="size-4" />
+                    )}
+                    Çözüldü Olarak İşaretle
+                  </Button>
+                </CardContent>
+              </Card>
+            );
+          })}
         </div>
       )}
 

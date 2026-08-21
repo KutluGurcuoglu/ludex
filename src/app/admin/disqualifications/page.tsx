@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Loader2, ThumbsDown, ThumbsUp } from "lucide-react";
+import { AlertOctagon, Loader2, ThumbsDown, ThumbsUp } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -70,6 +70,50 @@ export default function AdminDisqualificationsPage() {
           {pendingDisqualifications.map(({ evaluation, report, judge }) => {
             const recommendation = evaluation.disqualificationRecommendation!;
             const isResolving = resolvingReportId === report.id;
+
+            if (viewMode === "list") {
+              return (
+                <Card key={report.id} className="border-red-300 py-0 dark:border-red-900">
+                  <CardContent className="flex flex-wrap items-center gap-4 px-5 py-4">
+                    <AlertOctagon className="size-5 shrink-0 text-red-600 dark:text-red-400" />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-base font-semibold">{report.title}</p>
+                      <p className="truncate text-sm text-muted-foreground">
+                        {report.contestantName} &middot; Hakem: {judge?.name ?? "Bilinmeyen"} &middot;{" "}
+                        {recommendation.ruleText}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 gap-2">
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        disabled={isResolving}
+                        className="gap-1.5"
+                        onClick={() => handleResolveDisqualification(report.id, "upheld")}
+                      >
+                        {isResolving ? (
+                          <Loader2 className="size-4 animate-spin" />
+                        ) : (
+                          <ThumbsDown className="size-4" />
+                        )}
+                        Onayla
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={isResolving}
+                        className="gap-1.5"
+                        onClick={() => handleResolveDisqualification(report.id, "dismissed")}
+                      >
+                        <ThumbsUp className="size-4" />
+                        Reddet
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            }
+
             return (
               <Card key={report.id} className="border-red-300 dark:border-red-900">
                 <CardContent className="space-y-3 pt-6">
