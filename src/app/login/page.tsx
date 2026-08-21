@@ -4,7 +4,6 @@ import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { motion } from "motion/react";
 import { ArrowLeft, FileText, Gavel, Loader2, ShieldCheck, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -41,8 +40,6 @@ export default function LoginPage() {
       router.replace(DASHBOARD_PATH[currentUser.role]);
     }
   }, [hydrated, currentUser, router]);
-
-  const [authTab, setAuthTab] = useState<"login" | "register">("login");
 
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
@@ -149,7 +146,6 @@ export default function LoginPage() {
 
         <Card className="border-border/60 bg-card/80 shadow-xl backdrop-blur-sm">
           <CardContent className="pt-6">
-          <motion.div layout transition={{ type: "spring", stiffness: 400, damping: 36 }}>
             {awaitingVerification ? (
               <div className="space-y-4">
                 <div className="space-y-1.5 text-center">
@@ -209,7 +205,7 @@ export default function LoginPage() {
               </div>
             ) : (
               <>
-                <Tabs value={authTab} onValueChange={(v) => setAuthTab(v as "login" | "register")}>
+                <Tabs defaultValue="login">
               <TabsList className="grid w-full grid-cols-2">
                 <TabsTrigger value="login">Giriş Yap</TabsTrigger>
                 <TabsTrigger value="register">Kayıt Ol</TabsTrigger>
@@ -387,7 +383,6 @@ export default function LoginPage() {
             </div>
               </>
             )}
-          </motion.div>
           </CardContent>
         </Card>
       </div>
