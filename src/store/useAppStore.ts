@@ -27,6 +27,34 @@ function createNotification(
   };
 }
 
+/**
+ * Bir raporun durumunu, ona atanmış hakemlerin gönderdiği değerlendirmelere bakarak
+ * yeniden hesaplar. Birden fazla hakem atanmışsa "completed", hepsi puanlamayı
+ * tamamladığında; herhangi biri elenme önerisiyle onaylanmışsa "disqualified" olur.
+ */
+function computeAggregateReportStatus(
+  report: Report,
+  evaluations: JudgeEvaluation[],
+): ReportStatus {
+  if (report.assignedJudgeIds.length === 0) return "pending_assignment";
+
+  const relevantEvaluations = evaluations.filter(
+    (e) => e.reportId === report.id && report.assignedJudgeIds.includes(e.judgeId),
+  );
+  const submitted = relevantEvaluations.filter((e) => e.status === "submitted");
+
+  const anyUpheld = submitted.some(
+    (e) => e.disqualificationRecommendation?.adminDecision === "upheld",
+  );
+  if (anyUpheld) return "disqualified";
+
+  if (submitted.length > 0 && submitted.length >= report.assignedJudgeIds.length) {
+    return "completed";
+  }
+  if (relevantEvaluations.length > 0) return "in_review";
+  return "assigned";
+}
+
 function slugify(name: string) {
   return name
     .trim()
@@ -176,8 +204,9 @@ const SEED_REPORTS: Report[] = [
     fileSizeBytes: 4_200_000,
     pdfUrl: "/mock-pdfs/sample-report.pdf",
     status: "in_review",
-    assignedJudgeId: "judge-1",
+    assignedJudgeIds: ["judge-1"],
     assignedAt: "2026-08-10T10:00:00.000Z",
+    reviewStartedAt: "2026-08-10T15:00:00.000Z",
     submittedAt: "2026-08-08T14:32:00.000Z",
   },
   {
@@ -190,7 +219,7 @@ const SEED_REPORTS: Report[] = [
     fileSizeBytes: 5_800_000,
     pdfUrl: "/mock-pdfs/sample-report.pdf",
     status: "assigned",
-    assignedJudgeId: "judge-2",
+    assignedJudgeIds: ["judge-2"],
     assignedAt: "2026-08-12T11:00:00.000Z",
     submittedAt: "2026-08-11T09:15:00.000Z",
   },
@@ -204,6 +233,7 @@ const SEED_REPORTS: Report[] = [
     fileSizeBytes: 3_100_000,
     pdfUrl: "/mock-pdfs/sample-report.pdf",
     status: "pending_assignment",
+    assignedJudgeIds: [],
     submittedAt: "2026-08-15T16:45:00.000Z",
   },
   {
@@ -216,8 +246,9 @@ const SEED_REPORTS: Report[] = [
     fileSizeBytes: 2_650_000,
     pdfUrl: "/mock-pdfs/sample-report.pdf",
     status: "completed",
-    assignedJudgeId: "judge-1",
+    assignedJudgeIds: ["judge-1"],
     assignedAt: "2026-08-01T10:00:00.000Z",
+    reviewStartedAt: "2026-08-02T09:00:00.000Z",
     submittedAt: "2026-07-30T13:00:00.000Z",
   },
 ];
@@ -357,7 +388,7 @@ export interface AppState {
     pdfUrl: string;
   }) => Report;
   assignReports: (reportIds: string[], judgeId: string) => void;
-  setReportStatus: (reportId: string, status: ReportStatus) => void;
+  unassignJudge: (reportId: string, judgeId: string) => void;
   saveEvaluation: (evaluation: JudgeEvaluation) => void;
   resolveDisqualification: (reportId: string, decision: "upheld" | "dismissed") => void;
 
@@ -616,6 +647,7 @@ export const useAppStore = create<AppState>()(
           fileSizeBytes: input.fileSizeBytes,
           pdfUrl: input.pdfUrl,
           status: "pending_assignment",
+          assignedJudgeIds: [],
           submittedAt: new Date().toISOString(),
         };
 
@@ -628,64 +660,72 @@ export const useAppStore = create<AppState>()(
         set((state) => {
           const judge = state.users.find((u) => u.id === judgeId);
           const shouldNotify = judge && judge.notifyReportAssigned !== false;
+          const targets = state.reports.filter(
+            (r) => reportIds.includes(r.id) && !r.assignedJudgeIds.includes(judgeId),
+          );
           const newNotifications = shouldNotify
-            ? state.reports
-                .filter((r) => reportIds.includes(r.id))
-                .map((r) =>
-                  createNotification({
-                    userId: judgeId,
-                    kind: "report_assigned",
-                    title: "Yeni rapor atandı",
-                    body: r.title,
-                    link: "/judge",
-                  }),
-                )
+            ? targets.map((r) =>
+                createNotification({
+                  userId: judgeId,
+                  kind: "report_assigned",
+                  title: "Yeni rapor atandı",
+                  body: r.title,
+                  link: "/judge",
+                }),
+              )
             : [];
 
-          return {
-            reports: state.reports.map((r) =>
-              reportIds.includes(r.id)
-                ? { ...r, assignedJudgeId: judgeId, status: "assigned", assignedAt: now }
-                : r,
-            ),
-            notifications: [...newNotifications, ...state.notifications],
-          };
+          const reports = state.reports.map((r) => {
+            if (!reportIds.includes(r.id) || r.assignedJudgeIds.includes(judgeId)) return r;
+            const updated: Report = {
+              ...r,
+              assignedJudgeIds: [...r.assignedJudgeIds, judgeId],
+              assignedAt: now,
+            };
+            return { ...updated, status: computeAggregateReportStatus(updated, state.evaluations) };
+          });
+
+          return { reports, notifications: [...newNotifications, ...state.notifications] };
         });
       },
 
-      setReportStatus: (reportId, status) => {
+      unassignJudge: (reportId, judgeId) => {
         set((state) => ({
-          reports: state.reports.map((r) =>
-            r.id === reportId
-              ? {
-                  ...r,
-                  status,
-                  ...(status === "in_review" && !r.reviewStartedAt
-                    ? { reviewStartedAt: new Date().toISOString() }
-                    : {}),
-                }
-              : r,
-          ),
+          reports: state.reports.map((r) => {
+            if (r.id !== reportId || !r.assignedJudgeIds.includes(judgeId)) return r;
+            const updated: Report = {
+              ...r,
+              assignedJudgeIds: r.assignedJudgeIds.filter((id) => id !== judgeId),
+            };
+            return { ...updated, status: computeAggregateReportStatus(updated, state.evaluations) };
+          }),
         }));
       },
 
       saveEvaluation: (evaluation) => {
         set((state) => {
-          const exists = state.evaluations.some((e) => e.id === evaluation.id);
-          const evaluations = exists
+          const isFirstEvaluationForReport = !state.evaluations.some(
+            (e) => e.reportId === evaluation.reportId,
+          );
+          const evaluations = state.evaluations.some((e) => e.id === evaluation.id)
             ? state.evaluations.map((e) => (e.id === evaluation.id ? evaluation : e))
             : [...state.evaluations, evaluation];
 
-          const reports =
-            evaluation.status === "submitted"
-              ? state.reports.map((r) =>
-                  r.id === evaluation.reportId ? { ...r, status: "completed" as const } : r,
-                )
-              : state.reports;
+          const reports = state.reports.map((r) => {
+            if (r.id !== evaluation.reportId) return r;
+            const withReviewStamp: Report =
+              isFirstEvaluationForReport && !r.reviewStartedAt
+                ? { ...r, reviewStartedAt: new Date().toISOString() }
+                : r;
+            return {
+              ...withReviewStamp,
+              status: computeAggregateReportStatus(withReviewStamp, evaluations),
+            };
+          });
 
           let notifications = state.notifications;
           if (evaluation.status === "submitted") {
-            const report = state.reports.find((r) => r.id === evaluation.reportId);
+            const report = reports.find((r) => r.id === evaluation.reportId);
             const contestant = report
               ? state.users.find((u) => u.id === report.contestantId)
               : null;
@@ -710,7 +750,24 @@ export const useAppStore = create<AppState>()(
       resolveDisqualification: (reportId, decision) => {
         const now = new Date().toISOString();
         set((state) => {
-          const report = state.reports.find((r) => r.id === reportId);
+          const evaluations = state.evaluations.map((e) =>
+            e.reportId === reportId && e.disqualificationRecommendation
+              ? {
+                  ...e,
+                  disqualificationRecommendation: {
+                    ...e.disqualificationRecommendation,
+                    adminDecision: decision,
+                    adminDecidedAt: now,
+                  },
+                }
+              : e,
+          );
+
+          const reports = state.reports.map((r) =>
+            r.id === reportId ? { ...r, status: computeAggregateReportStatus(r, evaluations) } : r,
+          );
+
+          const report = reports.find((r) => r.id === reportId);
           const contestant = report
             ? state.users.find((u) => u.id === report.contestantId)
             : null;
@@ -721,23 +778,8 @@ export const useAppStore = create<AppState>()(
             contestant.notifyEvaluationUpdates !== false;
 
           return {
-            evaluations: state.evaluations.map((e) =>
-              e.reportId === reportId && e.disqualificationRecommendation
-                ? {
-                    ...e,
-                    disqualificationRecommendation: {
-                      ...e.disqualificationRecommendation,
-                      adminDecision: decision,
-                      adminDecidedAt: now,
-                    },
-                  }
-                : e,
-            ),
-            reports: state.reports.map((r) =>
-              r.id === reportId && decision === "upheld"
-                ? { ...r, status: "disqualified" as const }
-                : r,
-            ),
+            evaluations,
+            reports,
             notifications: shouldNotify
               ? [
                   createNotification({

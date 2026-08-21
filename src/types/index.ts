@@ -98,7 +98,8 @@ export interface Report {
   fileSizeBytes: number;
   pdfUrl: string;
   status: ReportStatus;
-  assignedJudgeId?: string;
+  /** Birden fazla hakem atanabilir; puanlar ortalanır, büyük sapmalarda admin uyarılır. */
+  assignedJudgeIds: string[];
   assignedAt?: string;
   /** Hakem raporu ilk kez "İncelemede" durumuna aldığında damgalanır — zaman çizelgesi için. */
   reviewStartedAt?: string;

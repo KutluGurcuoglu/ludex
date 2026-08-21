@@ -62,6 +62,7 @@ describe("useAppStore", () => {
       fileSizeBytes: 1000,
       pdfUrl: "blob:test",
     });
+    useAppStore.getState().assignReports([report.id], "judge-1");
 
     useAppStore.getState().saveEvaluation({
       id: `eval-${report.id}-judge-1`,
@@ -87,6 +88,7 @@ describe("useAppStore", () => {
       fileSizeBytes: 1000,
       pdfUrl: "blob:test",
     });
+    useAppStore.getState().assignReports([report.id], "judge-1");
 
     useAppStore.getState().saveEvaluation({
       id: `eval-${report.id}-judge-1`,
@@ -176,5 +178,54 @@ describe("useAppStore", () => {
 
     useAppStore.getState().resolveDisqualification(report.id, "upheld");
     expect(findDisqualificationNotice()).toBeDefined();
+  });
+
+  it("only completes a multi-judge report once every assigned judge has submitted", () => {
+    const report = useAppStore.getState().addReport({
+      contestantId: "contestant-1",
+      categoryId: "cat-yz",
+      title: "Çoklu hakem raporu",
+      fileName: "multi.pdf",
+      fileSizeBytes: 1000,
+      pdfUrl: "blob:test",
+    });
+    useAppStore.getState().assignReports([report.id], "judge-1");
+    useAppStore.getState().assignReports([report.id], "judge-2");
+    expect(
+      useAppStore.getState().reports.find((r) => r.id === report.id)?.assignedJudgeIds,
+    ).toEqual(["judge-1", "judge-2"]);
+
+    useAppStore.getState().saveEvaluation({
+      id: `eval-${report.id}-judge-1`,
+      reportId: report.id,
+      judgeId: "judge-1",
+      criteriaScores: [],
+      totalScore: 80,
+      overallComment: "",
+      status: "submitted",
+      updatedAt: new Date(0).toISOString(),
+    });
+    expect(useAppStore.getState().reports.find((r) => r.id === report.id)?.status).toBe(
+      "in_review",
+    );
+
+    useAppStore.getState().saveEvaluation({
+      id: `eval-${report.id}-judge-2`,
+      reportId: report.id,
+      judgeId: "judge-2",
+      criteriaScores: [],
+      totalScore: 60,
+      overallComment: "",
+      status: "submitted",
+      updatedAt: new Date(0).toISOString(),
+    });
+    expect(useAppStore.getState().reports.find((r) => r.id === report.id)?.status).toBe(
+      "completed",
+    );
+
+    useAppStore.getState().unassignJudge(report.id, "judge-1");
+    expect(
+      useAppStore.getState().reports.find((r) => r.id === report.id)?.assignedJudgeIds,
+    ).toEqual(["judge-2"]);
   });
 });

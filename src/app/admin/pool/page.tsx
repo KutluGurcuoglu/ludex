@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Loader2, Sparkles } from "lucide-react";
+import { AlertTriangle, Loader2, Plus, Sparkles, X } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -34,6 +34,7 @@ import {
 import { useAppStore } from "@/store/useAppStore";
 import * as reportsService from "@/services/reports.service";
 import { ReportTimeline } from "@/components/report-timeline";
+import { aggregateEvaluations } from "@/lib/scoring";
 import type { ReportStatus } from "@/types";
 import { formatDate, formatFileSize, STATUS_BADGE_CLASS, STATUS_LABEL } from "../_lib/shared";
 
@@ -115,6 +116,10 @@ export default function AdminPoolPage() {
     setBulkJudgeId("");
   }
 
+  async function handleUnassign(reportId: string, judgeId: string) {
+    await reportsService.unassignJudge(reportId, judgeId);
+  }
+
   async function handleAutoAssign() {
     const pending = reports.filter((r) => r.status === "pending_assignment");
     if (pending.length === 0) {
@@ -129,7 +134,9 @@ export default function AdminPoolPage() {
     const loadMap = new Map<string, number>();
     approvedJudges.forEach((j) => {
       const active = reports.filter(
-        (r) => r.assignedJudgeId === j.id && (r.status === "assigned" || r.status === "in_review"),
+        (r) =>
+          r.assignedJudgeIds.includes(j.id) &&
+          (r.status === "assigned" || r.status === "in_review"),
       ).length;
       loadMap.set(j.id, active);
     });
@@ -261,6 +268,14 @@ export default function AdminPoolPage() {
               ) : (
                 filteredReports.map((report) => {
                   const category = categories.find((c) => c.id === report.categoryId);
+                  const reportEvaluations = evaluations.filter((e) => e.reportId === report.id);
+                  const aggregate = aggregateEvaluations(reportEvaluations, []);
+                  const latestEvaluation = [...reportEvaluations].sort(
+                    (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+                  )[0];
+                  const availableJudges = judgesForCategory(report.categoryId).filter(
+                    (j) => !report.assignedJudgeIds.includes(j.id),
+                  );
                   return (
                     <TableRow key={report.id}>
                       <TableCell>
@@ -286,31 +301,60 @@ export default function AdminPoolPage() {
                           </Badge>
                           <ReportTimeline
                             report={report}
-                            evaluation={evaluations.find((e) => e.reportId === report.id)}
+                            evaluation={latestEvaluation}
                             compact
                             className="w-24"
                           />
+                          {aggregate?.highDeviation && (
+                            <p className="flex items-center gap-1 text-xs font-medium text-amber-600 dark:text-amber-400">
+                              <AlertTriangle className="size-3" />
+                              {aggregate.spread} puan fark
+                            </p>
+                          )}
                         </div>
                       </TableCell>
                       <TableCell>
-                        <Select
-                          value={report.assignedJudgeId ?? ""}
-                          onValueChange={(v) => requestAssign([report.id], v, report.title)}
-                        >
-                          <SelectTrigger className="w-[180px]">
-                            <SelectValue placeholder="Ata..." />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {judgesForCategory(report.categoryId).map((j) => (
-                              <SelectItem key={j.id} value={j.id}>
-                                {j.name}
-                                {j.categoryIds.includes(report.categoryId)
-                                  ? " ✓ Kategori uzmanı"
-                                  : ""}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        <div className="flex flex-wrap items-center gap-1">
+                          {report.assignedJudgeIds.map((judgeId) => {
+                            const assignedJudge = judges.find((j) => j.id === judgeId);
+                            return (
+                              <Badge key={judgeId} variant="secondary" className="gap-1 pr-1 text-xs">
+                                {assignedJudge?.name ?? "Bilinmeyen"}
+                                <button
+                                  type="button"
+                                  onClick={() => handleUnassign(report.id, judgeId)}
+                                  className="rounded-full p-0.5 hover:bg-muted-foreground/20"
+                                  aria-label={`${assignedJudge?.name ?? "Hakemi"} kaldır`}
+                                >
+                                  <X className="size-3" />
+                                </button>
+                              </Badge>
+                            );
+                          })}
+                          {availableJudges.length > 0 && (
+                            <Select
+                              value=""
+                              onValueChange={(v) => requestAssign([report.id], v, report.title)}
+                            >
+                              <SelectTrigger
+                                className="h-6 w-6 shrink-0 justify-center rounded-full border-dashed p-0 [&>svg]:hidden"
+                                aria-label="Hakem ekle"
+                              >
+                                <Plus className="size-3.5" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {availableJudges.map((j) => (
+                                  <SelectItem key={j.id} value={j.id}>
+                                    {j.name}
+                                    {j.categoryIds.includes(report.categoryId)
+                                      ? " ✓ Kategori uzmanı"
+                                      : ""}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
                         {formatDate(report.submittedAt)}

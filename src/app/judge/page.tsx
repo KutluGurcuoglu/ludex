@@ -53,7 +53,7 @@ import { useAppStore, useCurrentUser } from "@/store/useAppStore";
 import * as reportsService from "@/services/reports.service";
 import * as categoriesService from "@/services/categories.service";
 import * as usersService from "@/services/users.service";
-import type { Category, JudgeWorkStatus, Report, ReportStatus, User } from "@/types";
+import type { Category, JudgeEvaluation, JudgeWorkStatus, Report, User } from "@/types";
 
 const WORK_STATUS_LABEL: Record<JudgeWorkStatus, string> = {
   working: "Çalışıyorum",
@@ -114,7 +114,7 @@ function ReportList({
   emptyText,
 }: {
   reports: Report[];
-  onOpen: (reportId: string, status: ReportStatus) => void;
+  onOpen: (reportId: string) => void;
   startingId: string | null;
   actionLabel: string;
   emptyText: string;
@@ -143,7 +143,7 @@ function ReportList({
               <Button
                 size="sm"
                 disabled={isStarting}
-                onClick={() => onOpen(report.id, report.status)}
+                onClick={() => onOpen(report.id)}
                 className="gap-1.5 transition-transform active:scale-[0.97]"
               >
                 {isStarting && <Loader2 className="size-4 animate-spin" />}
@@ -157,13 +157,21 @@ function ReportList({
   );
 }
 
-function countByCategory(reports: Report[], categoryId: string) {
+/** Bir hakemin kendi ilerlemesi — rapor.status birden fazla hakem varsa toplam durumu
+ * yansıtır, bu yüzden "bu hakem ne yaptı" sorusu kendi değerlendirme kaydına bakılarak
+ * cevaplanır. */
+function countByCategory(
+  reports: Report[],
+  categoryId: string,
+  myEvaluationByReportId: Map<string, JudgeEvaluation>,
+) {
   const inCategory = reports.filter((r) => r.categoryId === categoryId);
   return {
     total: inCategory.length,
-    pending: inCategory.filter((r) => r.status === "assigned").length,
-    inReview: inCategory.filter((r) => r.status === "in_review").length,
-    completed: inCategory.filter((r) => r.status === "completed" || r.status === "disqualified")
+    pending: inCategory.filter((r) => !myEvaluationByReportId.has(r.id)).length,
+    inReview: inCategory.filter((r) => myEvaluationByReportId.get(r.id)?.status === "draft")
+      .length,
+    completed: inCategory.filter((r) => myEvaluationByReportId.get(r.id)?.status === "submitted")
       .length,
   };
 }
@@ -704,6 +712,7 @@ function JudgeDashboard() {
   const user = useCurrentUser();
   const categories = useAppStore((s) => s.categories);
   const reports = useAppStore((s) => s.reports);
+  const evaluations = useAppStore((s) => s.evaluations);
 
   const [isLoading, setIsLoading] = useState(true);
   const [startingId, setStartingId] = useState<string | null>(null);
@@ -721,9 +730,19 @@ function JudgeDashboard() {
   }, []);
 
   const myReports = useMemo(
-    () => (user ? reports.filter((r) => r.assignedJudgeId === user.id) : []),
+    () => (user ? reports.filter((r) => r.assignedJudgeIds.includes(user.id)) : []),
     [reports, user],
   );
+
+  const myEvaluationByReportId = useMemo(() => {
+    const map = new Map<string, JudgeEvaluation>();
+    if (user) {
+      evaluations.forEach((e) => {
+        if (e.judgeId === user.id) map.set(e.reportId, e);
+      });
+    }
+    return map;
+  }, [evaluations, user]);
 
   const myCategories = useMemo(() => {
     const categoryIds = new Set(myReports.map((r) => r.categoryId));
@@ -735,17 +754,16 @@ function JudgeDashboard() {
     ? myReports.filter((r) => r.categoryId === selectedCategory.id)
     : [];
 
-  const pending = categoryReports.filter((r) => r.status === "assigned");
-  const inReview = categoryReports.filter((r) => r.status === "in_review");
+  const pending = categoryReports.filter((r) => !myEvaluationByReportId.has(r.id));
+  const inReview = categoryReports.filter(
+    (r) => myEvaluationByReportId.get(r.id)?.status === "draft",
+  );
   const completed = categoryReports.filter(
-    (r) => r.status === "completed" || r.status === "disqualified",
+    (r) => myEvaluationByReportId.get(r.id)?.status === "submitted",
   );
 
-  async function handleOpen(reportId: string, currentStatus: ReportStatus) {
+  function handleOpen(reportId: string) {
     setStartingId(reportId);
-    if (currentStatus === "assigned") {
-      await reportsService.setReportStatus(reportId, "in_review");
-    }
     router.push(`/judge/evaluation/${reportId}`);
   }
 
@@ -847,7 +865,7 @@ function JudgeDashboard() {
               ) : (
                 <div className={viewMode === "grid" ? "grid gap-4 sm:grid-cols-2 lg:grid-cols-3" : "space-y-2"}>
                   {myCategories.map((category) => {
-                    const counts = countByCategory(myReports, category.id);
+                    const counts = countByCategory(myReports, category.id, myEvaluationByReportId);
                     const statTiles = (
                       <div className="grid grid-cols-3 gap-2 text-center text-sm">
                         <div className="rounded-lg bg-emerald-500/10 py-2 text-emerald-700 dark:text-emerald-400">

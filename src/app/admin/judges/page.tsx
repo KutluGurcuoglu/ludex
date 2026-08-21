@@ -42,15 +42,18 @@ export default function AdminJudgesPage() {
 
   const selectedJudge = judges.find((j) => j.id === selectedJudgeId) ?? null;
   const selectedJudgeReports = selectedJudge
-    ? reports.filter((r) => r.assignedJudgeId === selectedJudge.id)
+    ? reports.filter((r) => r.assignedJudgeIds.includes(selectedJudge.id))
     : [];
+  // Bir raporun genel durumu (report.status) birden fazla hakem atanmışsa hepsinin
+  // toplamını yansıtır; bu yüzden "bu hakem tamamladı mı" sorusu kendi değerlendirme
+  // kaydına bakılarak cevaplanır, report.status'e değil.
   const selectedJudgeCompletedEvaluations = selectedJudge
-    ? selectedJudgeReports
-        .filter((r) => r.status === "completed")
-        .flatMap((r) => {
-          const evaluation = evaluations.find((e) => e.reportId === r.id);
-          return evaluation ? [{ report: r, evaluation }] : [];
-        })
+    ? selectedJudgeReports.flatMap((r) => {
+        const evaluation = evaluations.find(
+          (e) => e.reportId === r.id && e.judgeId === selectedJudge.id && e.status === "submitted",
+        );
+        return evaluation ? [{ report: r, evaluation }] : [];
+      })
     : [];
 
   return (
@@ -66,12 +69,13 @@ export default function AdminJudgesPage() {
       </div>
       <div className={viewMode === "grid" ? "grid gap-4 sm:grid-cols-2 lg:grid-cols-3" : "space-y-2"}>
         {filteredJudges.map((judge) => {
-          const activeCount = reports.filter(
-            (r) => r.assignedJudgeId === judge.id && r.status !== "completed",
+          const judgeReports = reports.filter((r) => r.assignedJudgeIds.includes(judge.id));
+          const completedCount = judgeReports.filter((r) =>
+            evaluations.some(
+              (e) => e.reportId === r.id && e.judgeId === judge.id && e.status === "submitted",
+            ),
           ).length;
-          const completedCount = reports.filter(
-            (r) => r.assignedJudgeId === judge.id && r.status === "completed",
-          ).length;
+          const activeCount = judgeReports.length - completedCount;
           const expertise = categories.filter((c) => judge.categoryIds.includes(c.id));
           const approvalBadge = (
             <Badge

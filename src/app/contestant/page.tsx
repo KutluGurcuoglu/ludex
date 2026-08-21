@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils";
 import { RouteGuard } from "@/components/auth/route-guard";
 import { AppHeader } from "@/components/layout/app-header";
 import { ReportTimeline } from "@/components/report-timeline";
+import { aggregateEvaluations } from "@/lib/scoring";
 import {
   Card,
   CardContent,
@@ -245,7 +246,23 @@ function ContestantDashboard() {
   );
 
   const detailReport = reports.find((r) => r.id === detailReportId) ?? null;
-  const detailEvaluation = evaluations.find((e) => e.reportId === detailReportId) ?? null;
+  const detailReportEvaluations = useMemo(
+    () => evaluations.filter((e) => e.reportId === detailReportId),
+    [evaluations, detailReportId],
+  );
+  // Birden fazla hakem atanmışsa puanlar ortalanır; büyük sapmalarda admin zaten
+  // uyarılıyor (bkz. admin/pool), yarışmacıya tek bir adil sonuç gösterilir.
+  const detailAggregate = useMemo(
+    () => aggregateEvaluations(detailReportEvaluations, scoreCriteria),
+    [detailReportEvaluations, scoreCriteria],
+  );
+  const detailDisqualification = detailReportEvaluations
+    .map((e) => e.disqualificationRecommendation)
+    .find((d) => d?.adminDecision === "upheld");
+  // Zaman çizelgesindeki "sonuç" adımı için en güncel değerlendirmeyi kullan.
+  const detailLatestEvaluation = [...detailReportEvaluations].sort(
+    (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+  )[0];
 
   const myReports = useMemo(
     () =>
@@ -601,26 +618,37 @@ function ContestantDashboard() {
               </DialogHeader>
 
               {detailReport && (
-                <ReportTimeline report={detailReport} evaluation={detailEvaluation} className="pb-1" />
+                <ReportTimeline
+                  report={detailReport}
+                  evaluation={detailLatestEvaluation}
+                  className="pb-1"
+                />
               )}
 
-              {detailEvaluation ? (
+              {detailAggregate ? (
                 <div className="space-y-5">
-                  {detailEvaluation.disqualificationRecommendation?.adminDecision === "upheld" && (
+                  {detailDisqualification && (
                     <div className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-base text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
                       <XCircle className="mt-0.5 size-4 shrink-0" />
                       <div>
                         <p className="font-medium">Bu rapor elenmiştir</p>
-                        <p className="mt-0.5 text-sm">
-                          {detailEvaluation.disqualificationRecommendation.findingText}
-                        </p>
+                        <p className="mt-0.5 text-sm">{detailDisqualification.findingText}</p>
                       </div>
                     </div>
                   )}
                   <div className="flex items-center justify-between rounded-xl bg-muted/50 px-4 py-3">
-                    <span className="text-base font-medium text-muted-foreground">Toplam Puan</span>
+                    <div>
+                      <span className="text-base font-medium text-muted-foreground">
+                        {detailAggregate.judgeCount > 1 ? "Ortalama Puan" : "Toplam Puan"}
+                      </span>
+                      {detailAggregate.judgeCount > 1 && (
+                        <p className="text-sm text-muted-foreground">
+                          {detailAggregate.judgeCount} hakemin ortalaması
+                        </p>
+                      )}
+                    </div>
                     <span className="text-2xl font-bold text-primary">
-                      {detailEvaluation.totalScore}
+                      {Math.round(detailAggregate.averageTotal * 10) / 10}
                       <span className="text-base font-medium text-muted-foreground">
                         {" "}
                         / {maxTotalScore}
@@ -630,35 +658,48 @@ function ContestantDashboard() {
 
                   <div className="space-y-4">
                     {scoreCriteria.map((criterion) => {
-                      const criterionScore = detailEvaluation.criteriaScores.find(
-                        (cs) => cs.criterionId === criterion.id,
-                      );
-                      const score = criterionScore?.score ?? 0;
+                      const average =
+                        detailAggregate.criteriaAverages.find(
+                          (c) => c.criterionId === criterion.id,
+                        )?.average ?? 0;
+                      const singleComment =
+                        detailAggregate.judgeCount === 1
+                          ? detailAggregate.evaluations[0]?.criteriaScores.find(
+                              (cs) => cs.criterionId === criterion.id,
+                            )?.comment
+                          : undefined;
                       return (
                         <div key={criterion.id} className="space-y-1.5">
                           <div className="flex items-center justify-between text-base">
                             <span className="font-medium">{criterion.label}</span>
                             <span className="text-muted-foreground">
-                              {score} / {criterion.maxScore}
+                              {Math.round(average * 10) / 10} / {criterion.maxScore}
                             </span>
                           </div>
-                          <Progress value={(score / criterion.maxScore) * 100} />
-                          {criterionScore?.comment && (
-                            <p className="text-sm text-muted-foreground">
-                              {criterionScore.comment}
-                            </p>
+                          <Progress value={(average / criterion.maxScore) * 100} />
+                          {singleComment && (
+                            <p className="text-sm text-muted-foreground">{singleComment}</p>
                           )}
                         </div>
                       );
                     })}
                   </div>
 
-                  {detailEvaluation.overallComment && (
-                    <div className="rounded-xl border border-border bg-muted/30 p-3">
-                      <p className="mb-1 text-base font-medium">Hakem Yorumu</p>
-                      <p className="text-base text-muted-foreground">
-                        {detailEvaluation.overallComment}
+                  {detailAggregate.evaluations.some((e) => e.overallComment) && (
+                    <div className="space-y-2 rounded-xl border border-border bg-muted/30 p-3">
+                      <p className="text-base font-medium">
+                        {detailAggregate.judgeCount > 1 ? "Hakem Yorumları" : "Hakem Yorumu"}
                       </p>
+                      {detailAggregate.evaluations.map((e, i) =>
+                        e.overallComment ? (
+                          <p key={e.id} className="text-base text-muted-foreground">
+                            {detailAggregate.judgeCount > 1 && (
+                              <span className="font-medium">Hakem {i + 1}: </span>
+                            )}
+                            {e.overallComment}
+                          </p>
+                        ) : null,
+                      )}
                     </div>
                   )}
 
