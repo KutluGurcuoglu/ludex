@@ -13,6 +13,7 @@ import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { getEffectiveCriteria, useAppStore } from "@/store/useAppStore";
 import * as evaluationsService from "@/services/evaluations.service";
+import { refreshEvaluations } from "@/services/sync";
 import { APPROVAL_STATUS_BADGE_CLASS, APPROVAL_STATUS_LABEL, STATUS_BADGE_CLASS, STATUS_LABEL, useViewMode } from "../_lib/shared";
 
 export default function AdminJudgesPage() {
@@ -30,9 +31,15 @@ export default function AdminJudgesPage() {
 
   async function handleApprove(evaluationId: string) {
     setApprovingId(evaluationId);
-    await evaluationsService.approveEvaluation(evaluationId);
-    setApprovingId(null);
-    toast.success("Sonuç yarışmacıya yayınlandı.");
+    try {
+      await evaluationsService.approveEvaluation(evaluationId);
+      await refreshEvaluations();
+      toast.success("Sonuç yarışmacıya yayınlandı.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Onaylanamadı.");
+    } finally {
+      setApprovingId(null);
+    }
   }
 
   const filteredJudges = useMemo(() => {

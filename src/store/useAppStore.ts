@@ -435,6 +435,19 @@ export interface AppState {
   passwordResetRequest: PasswordResetRequest | null;
   emailVerificationRequest: EmailVerificationRequest | null;
 
+  /**
+   * Gerçek backend'den çekilen veriyi store'a yazan setter'lar. Mock CRUD
+   * action'larından farklı olarak bunlar sunucudan gelen veriyi olduğu gibi
+   * yansıtır — sayfalar hâlâ bu store'dan okuduğu için (useAppStore
+   * selector'ları), gerçek fetch sonuçlarının ekrana yansıması için
+   * kullanılır (bkz. src/services/*.ts).
+   */
+  setReports: (reports: Report[]) => void;
+  setCategories: (categories: Category[]) => void;
+  setEvaluations: (evaluations: JudgeEvaluation[]) => void;
+  setScoreCriteria: (criteria: ScoreCriterion[]) => void;
+  setUsers: (users: User[]) => void;
+
   markNotificationRead: (id: string) => void;
   markAllNotificationsRead: (userId: string) => void;
   sendSupportMessage: (userId: string, subject: string, message: string) => void;
@@ -946,7 +959,28 @@ export const useAppStore = create<AppState>()(
         if (user) set({ currentUserId: user.id });
       },
 
-      logout: () => set({ currentUserId: null }),
+      // Gerçek oturumdan çekilmiş veri (reports/evaluations/users/categories/
+      // scoreCriteria) yalnızca currentUserId temizlenirse localStorage'da
+      // kalıcı kalır — paylaşılan bir bilgisayarda bir sonraki kullanıcı,
+      // taze bir fetch üzerine yazana kadar önceki kullanıcının gerçek
+      // verisini görebilir. Bu yüzden çıkışta bu alanlar seed/demo verisine
+      // sıfırlanır (boş değil — demoLogin'in çalışabilmesi için seed
+      // kullanıcılarının var olması gerekir).
+      logout: () =>
+        set({
+          currentUserId: null,
+          reports: SEED_REPORTS,
+          evaluations: SEED_EVALUATIONS,
+          users: SEED_USERS,
+          categories: CATEGORIES,
+          scoreCriteria: SCORE_CRITERIA,
+        }),
+
+      setReports: (reports) => set({ reports }),
+      setCategories: (categories) => set({ categories }),
+      setEvaluations: (evaluations) => set({ evaluations }),
+      setScoreCriteria: (criteria) => set({ scoreCriteria: criteria }),
+      setUsers: (users) => set({ users }),
 
       updateProfile: (userId, updates) => {
         set((state) => ({
@@ -1539,7 +1573,8 @@ export const useCurrentUser = (): User | null => {
       email: session.user.email ?? "",
       phone: "",
       role: session.user.role,
-      categoryIds: [],
+      categoryIds: session.user.categoryIds,
+      judgeApprovalStatus: session.user.judgeApprovalStatus,
       createdAt: "",
     };
   }

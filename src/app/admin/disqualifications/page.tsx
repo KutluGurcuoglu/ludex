@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { useAppStore } from "@/store/useAppStore";
 import * as evaluationsService from "@/services/evaluations.service";
+import { refreshEvaluations, refreshReports } from "@/services/sync";
 import { useViewMode } from "../_lib/shared";
 
 export default function AdminDisqualificationsPage() {
@@ -17,7 +18,7 @@ export default function AdminDisqualificationsPage() {
   const evaluations = useAppStore((s) => s.evaluations);
   const { viewMode } = useViewMode();
 
-  const [resolvingReportId, setResolvingReportId] = useState<string | null>(null);
+  const [resolvingEvaluationId, setResolvingEvaluationId] = useState<string | null>(null);
 
   const disqualificationRequests = useMemo(
     () =>
@@ -44,13 +45,23 @@ export default function AdminDisqualificationsPage() {
     [disqualificationRequests],
   );
 
-  async function handleResolveDisqualification(reportId: string, decision: "upheld" | "dismissed") {
-    setResolvingReportId(reportId);
-    await evaluationsService.resolveDisqualification(reportId, decision);
-    setResolvingReportId(null);
-    toast.success(
-      decision === "upheld" ? "Rapor elendi olarak işaretlendi." : "Elenme önerisi reddedildi.",
-    );
+  async function handleResolveDisqualification(
+    evaluationId: string,
+    decision: "upheld" | "dismissed",
+  ) {
+    setResolvingEvaluationId(evaluationId);
+    try {
+      await evaluationsService.resolveDisqualification(evaluationId, decision);
+      // "upheld" ise rapor durumu sunucuda disqualified'a dönüyor — ikisini de tazele.
+      await Promise.all([refreshEvaluations(), refreshReports()]);
+      toast.success(
+        decision === "upheld" ? "Rapor elendi olarak işaretlendi." : "Elenme önerisi reddedildi.",
+      );
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "İşlem başarısız oldu.");
+    } finally {
+      setResolvingEvaluationId(null);
+    }
   }
 
   return (
@@ -69,7 +80,7 @@ export default function AdminDisqualificationsPage() {
         <div className={viewMode === "grid" ? "grid gap-4 sm:grid-cols-2 lg:grid-cols-3" : "space-y-2"}>
           {pendingDisqualifications.map(({ evaluation, report, judge }) => {
             const recommendation = evaluation.disqualificationRecommendation!;
-            const isResolving = resolvingReportId === report.id;
+            const isResolving = resolvingEvaluationId === evaluation.id;
 
             if (viewMode === "list") {
               return (
@@ -89,7 +100,7 @@ export default function AdminDisqualificationsPage() {
                         variant="destructive"
                         disabled={isResolving}
                         className="gap-1.5"
-                        onClick={() => handleResolveDisqualification(report.id, "upheld")}
+                        onClick={() => handleResolveDisqualification(evaluation.id, "upheld")}
                       >
                         {isResolving ? (
                           <Loader2 className="size-4 animate-spin" />
@@ -103,7 +114,7 @@ export default function AdminDisqualificationsPage() {
                         variant="outline"
                         disabled={isResolving}
                         className="gap-1.5"
-                        onClick={() => handleResolveDisqualification(report.id, "dismissed")}
+                        onClick={() => handleResolveDisqualification(evaluation.id, "dismissed")}
                       >
                         <ThumbsUp className="size-4" />
                         Reddet
@@ -149,7 +160,7 @@ export default function AdminDisqualificationsPage() {
                       variant="destructive"
                       disabled={isResolving}
                       className="flex-1 gap-1.5"
-                      onClick={() => handleResolveDisqualification(report.id, "upheld")}
+                      onClick={() => handleResolveDisqualification(evaluation.id, "upheld")}
                     >
                       {isResolving ? (
                         <Loader2 className="size-4 animate-spin" />
@@ -163,7 +174,7 @@ export default function AdminDisqualificationsPage() {
                       variant="outline"
                       disabled={isResolving}
                       className="flex-1 gap-1.5"
-                      onClick={() => handleResolveDisqualification(report.id, "dismissed")}
+                      onClick={() => handleResolveDisqualification(evaluation.id, "dismissed")}
                     >
                       <ThumbsUp className="size-4" />
                       Reddet

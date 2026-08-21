@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/dialog";
 import { useAppStore } from "@/store/useAppStore";
 import * as categoriesService from "@/services/categories.service";
+import { refreshCategories } from "@/services/sync";
 import { CompetitionEditSheet, useViewMode } from "../_lib/shared";
 
 export default function AdminCompetitionsPage() {
@@ -39,16 +40,22 @@ export default function AdminCompetitionsPage() {
     e.preventDefault();
     if (!newCompetitionName.trim()) return;
     setCreatingCompetition(true);
-    const created = await categoriesService.createCategory({
-      name: newCompetitionName.trim(),
-      description: newCompetitionDescription.trim() || undefined,
-    });
-    setCreatingCompetition(false);
-    toast.success(`"${created.name}" yarışması oluşturuldu.`);
-    setNewCompetitionName("");
-    setNewCompetitionDescription("");
-    setCreateCompetitionOpen(false);
-    setEditCompetitionId(created.id);
+    try {
+      const created = await categoriesService.createCategory({
+        name: newCompetitionName.trim(),
+        description: newCompetitionDescription.trim() || undefined,
+      });
+      await refreshCategories();
+      toast.success(`"${created.name}" yarışması oluşturuldu.`);
+      setNewCompetitionName("");
+      setNewCompetitionDescription("");
+      setCreateCompetitionOpen(false);
+      setEditCompetitionId(created.id);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Yarışma oluşturulamadı.");
+    } finally {
+      setCreatingCompetition(false);
+    }
   }
 
   return (

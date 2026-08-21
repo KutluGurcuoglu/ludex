@@ -54,8 +54,12 @@ import {
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { getEffectiveCriteria, useAppStore, useCurrentUser } from "@/store/useAppStore";
 import * as reportsService from "@/services/reports.service";
-import * as categoriesService from "@/services/categories.service";
-import * as evaluationsService from "@/services/evaluations.service";
+import {
+  refreshReports,
+  refreshCategories,
+  refreshEvaluations,
+  refreshScoreCriteria,
+} from "@/services/sync";
 import type { Category, ReportStatus } from "@/types";
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20 MB
@@ -232,14 +236,13 @@ function ContestantDashboard() {
 
   useEffect(() => {
     let active = true;
-    Promise.all([
-      reportsService.getReports(),
-      categoriesService.getCategories(),
-      evaluationsService.getEvaluations(),
-      evaluationsService.getScoreCriteria(),
-    ]).then(() => {
-      if (active) setIsLoading(false);
-    });
+    Promise.all([refreshReports(), refreshCategories(), refreshEvaluations(), refreshScoreCriteria()])
+      .catch((error) => {
+        console.error("Yarışmacı verileri yüklenemedi:", error);
+      })
+      .finally(() => {
+        if (active) setIsLoading(false);
+      });
     return () => {
       active = false;
     };
@@ -328,6 +331,7 @@ function ContestantDashboard() {
     setSubmitting(true);
     try {
       await reportsService.submitReport({ categoryId, title: title.trim(), file });
+      await refreshReports();
       toast.success("Raporun başarıyla gönderildi.", {
         description: "Admin tarafından bir hakeme atandığında durumunu buradan takip edebilirsin.",
       });

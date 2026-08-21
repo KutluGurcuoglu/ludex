@@ -42,6 +42,7 @@ import {
 } from "@/components/ui/dialog";
 import { useAppStore } from "@/store/useAppStore";
 import * as categoriesService from "@/services/categories.service";
+import { refreshCategories } from "@/services/sync";
 import type { Category, JudgeApprovalStatus, JudgeWorkStatus, ReportStatus, ScoreCriterion } from "@/types";
 
 function toLocalInputValue(iso: string) {
@@ -611,13 +612,19 @@ function SubmissionWindowSection({ category }: { category: Category }) {
   async function handleSave(e: FormEvent) {
     e.preventDefault();
     setSaving(true);
-    await categoriesService.setCategorySubmissionWindow(
-      category.id,
-      opensAt ? new Date(opensAt).toISOString() : null,
-      closesAt ? new Date(closesAt).toISOString() : null,
-    );
-    setSaving(false);
-    toast.success("Gönderim takvimi güncellendi.");
+    try {
+      await categoriesService.setCategorySubmissionWindow(
+        category.id,
+        opensAt ? new Date(opensAt).toISOString() : null,
+        closesAt ? new Date(closesAt).toISOString() : null,
+      );
+      await refreshCategories();
+      toast.success("Gönderim takvimi güncellendi.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Takvim güncellenemedi.");
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -671,12 +678,18 @@ export function CompetitionEditSheet({ competition }: { competition: Category })
   async function handleSave(e: FormEvent) {
     e.preventDefault();
     setSaving(true);
-    await categoriesService.updateCategory(competition.id, {
-      name: name.trim(),
-      description: description.trim(),
-    });
-    setSaving(false);
-    toast.success("Yarışma bilgileri güncellendi.");
+    try {
+      await categoriesService.updateCategory(competition.id, {
+        name: name.trim(),
+        description: description.trim(),
+      });
+      await refreshCategories();
+      toast.success("Yarışma bilgileri güncellendi.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Güncellenemedi.");
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function handleSpecFile(file: File) {

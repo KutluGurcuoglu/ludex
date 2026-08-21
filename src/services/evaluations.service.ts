@@ -1,49 +1,93 @@
-import { useAppStore, type AppState } from "@/store/useAppStore";
 import type { JudgeEvaluation, ScoreCriterion } from "@/types";
-import { simulateNetworkDelay } from "./delay";
 
-export function getEvaluations(): Promise<JudgeEvaluation[]> {
-  return simulateNetworkDelay(useAppStore.getState().evaluations);
+export async function getEvaluations(): Promise<JudgeEvaluation[]> {
+  const res = await fetch("/api/evaluations");
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error ?? "Değerlendirmeler alınamadı.");
+  return data.evaluations;
 }
 
-export function getScoreCriteria(): Promise<ScoreCriterion[]> {
-  return simulateNetworkDelay(useAppStore.getState().scoreCriteria);
+export async function getScoreCriteria(): Promise<ScoreCriterion[]> {
+  const res = await fetch("/api/score-criteria");
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error ?? "Değerlendirme kriterleri alınamadı.");
+  return data.criteria;
 }
 
-export function saveEvaluation(evaluation: JudgeEvaluation): Promise<void> {
-  useAppStore.getState().saveEvaluation(evaluation);
-  return simulateNetworkDelay(undefined);
+export async function saveEvaluation(evaluation: JudgeEvaluation): Promise<void> {
+  const res = await fetch(`/api/reports/${evaluation.reportId}/evaluations`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      criteriaScores: evaluation.criteriaScores,
+      overallComment: evaluation.overallComment,
+      status: evaluation.status,
+      disqualificationRecommendation: evaluation.disqualificationRecommendation ?? null,
+    }),
+  });
+  if (!res.ok) {
+    const data = await res.json();
+    throw new Error(data.error ?? "Değerlendirme kaydedilemedi.");
+  }
 }
 
-export function resolveDisqualification(
-  reportId: string,
+export async function resolveDisqualification(
+  evaluationId: string,
   decision: "upheld" | "dismissed",
 ): Promise<void> {
-  useAppStore.getState().resolveDisqualification(reportId, decision);
-  return simulateNetworkDelay(undefined);
+  const res = await fetch(`/api/evaluations/${evaluationId}/disqualification-decision`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ decision }),
+  });
+  if (!res.ok) {
+    const data = await res.json();
+    throw new Error(data.error ?? "Karar kaydedilemedi.");
+  }
 }
 
-export function approveEvaluation(evaluationId: string): Promise<void> {
-  useAppStore.getState().approveEvaluation(evaluationId);
-  return simulateNetworkDelay(undefined);
+export async function approveEvaluation(evaluationId: string): Promise<void> {
+  const res = await fetch(`/api/evaluations/${evaluationId}/approve`, { method: "POST" });
+  if (!res.ok) {
+    const data = await res.json();
+    throw new Error(data.error ?? "Değerlendirme onaylanamadı.");
+  }
 }
 
-export function addScoreCriterion(
-  input: Parameters<AppState["addScoreCriterion"]>[0],
-): Promise<ScoreCriterion> {
-  const created = useAppStore.getState().addScoreCriterion(input);
-  return simulateNetworkDelay(created);
+export async function addScoreCriterion(input: {
+  label: string;
+  maxScore: number;
+  description?: string;
+}): Promise<ScoreCriterion> {
+  const res = await fetch("/api/score-criteria", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error ?? "Kriter oluşturulamadı.");
+  return data.criterion;
 }
 
-export function updateScoreCriterion(
+export async function updateScoreCriterion(
   id: string,
-  updates: Parameters<AppState["updateScoreCriterion"]>[1],
+  updates: { label?: string; maxScore?: number; description?: string },
 ): Promise<void> {
-  useAppStore.getState().updateScoreCriterion(id, updates);
-  return simulateNetworkDelay(undefined);
+  const res = await fetch(`/api/score-criteria/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(updates),
+  });
+  if (!res.ok) {
+    const data = await res.json();
+    throw new Error(data.error ?? "Kriter güncellenemedi.");
+  }
 }
 
-export function deleteScoreCriterion(id: string): Promise<void> {
-  useAppStore.getState().deleteScoreCriterion(id);
-  return simulateNetworkDelay(undefined);
+export async function deleteScoreCriterion(id: string): Promise<void> {
+  const res = await fetch(`/api/score-criteria/${id}`, { method: "DELETE" });
+  if (!res.ok) {
+    const data = await res.json();
+    throw new Error(data.error ?? "Kriter silinemedi.");
+  }
 }

@@ -1,15 +1,19 @@
 import type { DefaultSession } from "next-auth";
-import type { UserRole } from "@/types";
+import type { JudgeApprovalStatus, UserRole } from "@/types";
 
 declare module "next-auth" {
   interface User {
     role: UserRole;
+    categoryIds: string[];
+    judgeApprovalStatus?: JudgeApprovalStatus;
   }
 
   interface Session {
     user: {
       id: string;
       role: UserRole;
+      categoryIds: string[];
+      judgeApprovalStatus?: JudgeApprovalStatus;
     } & DefaultSession["user"];
   }
 }
@@ -21,5 +25,7 @@ declare module "@auth/core/jwt" {
   interface JWT {
     id: string;
     role: UserRole;
+    categoryIds: string[];
+    judgeApprovalStatus?: JudgeApprovalStatus;
   }
 }

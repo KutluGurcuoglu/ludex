@@ -47,6 +47,7 @@ export interface EvaluationRepository {
   findById(id: string): Promise<EvaluationRecord | null>;
   findByReportAndJudge(reportId: string, judgeId: string): Promise<EvaluationRecord | null>;
   listByReport(reportId: string): Promise<EvaluationRecord[]>;
+  listAll(): Promise<EvaluationRecord[]>;
   setVisibleToContestant(id: string, visible: boolean): Promise<EvaluationRecord | null>;
   setDisqualificationDecision(
     id: string,
@@ -91,6 +92,10 @@ class InMemoryEvaluationRepository implements EvaluationRepository {
 
   async listByReport(reportId: string): Promise<EvaluationRecord[]> {
     return Array.from(this.evaluationsById.values()).filter((e) => e.reportId === reportId);
+  }
+
+  async listAll(): Promise<EvaluationRecord[]> {
+    return Array.from(this.evaluationsById.values());
   }
 
   async setVisibleToContestant(id: string, visible: boolean): Promise<EvaluationRecord | null> {

@@ -10,6 +10,11 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
   // "database" stratejisine ve gerçek bir Adapter'a geçilmeli — bu, admin'in
   // bir hakemin oturumunu anında iptal edebilmesini sağlar (JWT'de bu mümkün
   // değildir, token süresi dolana kadar geçerli kalır).
+  //
+  // Aynı sebeple categoryIds/judgeApprovalStatus yalnızca giriş anında token'a
+  // yazılır — admin bir hakemi zaten oturum açıkken onaylarsa, hakem tekrar
+  // giriş yapana kadar bunu görmez. "database" stratejisine geçince bu da
+  // çözülür (session her istekte DB'den taze okunabilir).
   session: { strategy: "jwt" },
   pages: {
     signIn: "/login",
@@ -37,6 +42,8 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           name: user.name,
           email: user.email,
           role: user.role,
+          categoryIds: user.categoryIds,
+          judgeApprovalStatus: user.judgeApprovalStatus,
         };
       },
     }),
@@ -46,12 +53,16 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       if (user) {
         token.id = user.id as string;
         token.role = user.role;
+        token.categoryIds = user.categoryIds;
+        token.judgeApprovalStatus = user.judgeApprovalStatus;
       }
       return token;
     },
     session: ({ session, token }) => {
       session.user.id = token.id;
       session.user.role = token.role;
+      session.user.categoryIds = token.categoryIds;
+      session.user.judgeApprovalStatus = token.judgeApprovalStatus;
       return session;
     },
   },

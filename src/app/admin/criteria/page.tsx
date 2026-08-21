@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/dialog";
 import { useAppStore } from "@/store/useAppStore";
 import * as evaluationsService from "@/services/evaluations.service";
+import { refreshScoreCriteria } from "@/services/sync";
 import { useViewMode } from "../_lib/shared";
 
 export default function AdminCriteriaPage() {
@@ -63,29 +64,41 @@ export default function AdminCriteriaPage() {
     if (!criterionLabel.trim() || !Number.isFinite(maxScore) || maxScore <= 0) return;
 
     setSavingCriterion(true);
-    if (editingCriterionId) {
-      await evaluationsService.updateScoreCriterion(editingCriterionId, {
-        label: criterionLabel.trim(),
-        maxScore,
-        description: criterionDescription.trim() || undefined,
-      });
-    } else {
-      await evaluationsService.addScoreCriterion({
-        label: criterionLabel.trim(),
-        maxScore,
-        description: criterionDescription.trim() || undefined,
-      });
+    try {
+      if (editingCriterionId) {
+        await evaluationsService.updateScoreCriterion(editingCriterionId, {
+          label: criterionLabel.trim(),
+          maxScore,
+          description: criterionDescription.trim() || undefined,
+        });
+      } else {
+        await evaluationsService.addScoreCriterion({
+          label: criterionLabel.trim(),
+          maxScore,
+          description: criterionDescription.trim() || undefined,
+        });
+      }
+      await refreshScoreCriteria();
+      toast.success(editingCriterionId ? "Kriter güncellendi." : "Yeni kriter eklendi.");
+      setCriterionDialogOpen(false);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Kaydedilemedi.");
+    } finally {
+      setSavingCriterion(false);
     }
-    setSavingCriterion(false);
-    toast.success(editingCriterionId ? "Kriter güncellendi." : "Yeni kriter eklendi.");
-    setCriterionDialogOpen(false);
   }
 
   async function handleDeleteCriterion(criterionId: string) {
     setDeletingCriterionId(criterionId);
-    await evaluationsService.deleteScoreCriterion(criterionId);
-    setDeletingCriterionId(null);
-    toast.success("Kriter silindi.");
+    try {
+      await evaluationsService.deleteScoreCriterion(criterionId);
+      await refreshScoreCriteria();
+      toast.success("Kriter silindi.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Silinemedi.");
+    } finally {
+      setDeletingCriterionId(null);
+    }
   }
 
   return (

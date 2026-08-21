@@ -20,11 +20,14 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useAppStore } from "@/store/useAppStore";
-import * as reportsService from "@/services/reports.service";
-import * as categoriesService from "@/services/categories.service";
 import * as usersService from "@/services/users.service";
-import * as evaluationsService from "@/services/evaluations.service";
 import * as supportService from "@/services/support.service";
+import {
+  refreshReports,
+  refreshCategories,
+  refreshEvaluations,
+  refreshScoreCriteria,
+} from "@/services/sync";
 import {
   AdminSkeleton,
   APPROVAL_STATUS_BADGE_CLASS,
@@ -59,15 +62,19 @@ function AdminShell({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let active = true;
     Promise.all([
-      reportsService.getReports(),
-      categoriesService.getCategories(),
+      refreshReports(),
+      refreshCategories(),
       usersService.getUsers(),
-      evaluationsService.getEvaluations(),
-      evaluationsService.getScoreCriteria(),
+      refreshEvaluations(),
+      refreshScoreCriteria(),
       supportService.getSupportMessages(),
-    ]).then(() => {
-      if (active) setIsLoading(false);
-    });
+    ])
+      .catch((error) => {
+        console.error("Admin verileri yüklenemedi:", error);
+      })
+      .finally(() => {
+        if (active) setIsLoading(false);
+      });
     return () => {
       active = false;
     };

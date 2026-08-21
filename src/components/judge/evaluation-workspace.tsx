@@ -64,8 +64,8 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { getEffectiveCriteria, useAppStore, useCurrentUser } from "@/store/useAppStore";
-import * as reportsService from "@/services/reports.service";
 import * as evaluationsService from "@/services/evaluations.service";
+import { refreshReports, refreshEvaluations, refreshScoreCriteria } from "@/services/sync";
 import * as aiAnalysisService from "@/services/ai-analysis.service";
 import { simulateNetworkDelay } from "@/services/delay";
 import { buildHighlightQuery, highlightTextItem } from "@/lib/pdf-highlight";
@@ -340,13 +340,13 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
 
   useEffect(() => {
     let active = true;
-    Promise.all([
-      reportsService.getReports(),
-      evaluationsService.getEvaluations(),
-      evaluationsService.getScoreCriteria(),
-    ]).then(() => {
-      if (active) setIsLoading(false);
-    });
+    Promise.all([refreshReports(), refreshEvaluations(), refreshScoreCriteria()])
+      .catch((error) => {
+        console.error("Değerlendirme verileri yüklenemedi:", error);
+      })
+      .finally(() => {
+        if (active) setIsLoading(false);
+      });
     return () => {
       active = false;
     };
@@ -545,12 +545,19 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
       updatedAt: new Date().toISOString(),
     };
 
-    await evaluationsService.saveEvaluation(evaluation);
-    setSaving(false);
-
-    toast.success(status === "draft" ? "Taslak kaydedildi." : "Değerlendirme tamamlandı.");
-    if (status === "submitted") {
-      router.push("/judge");
+    try {
+      await evaluationsService.saveEvaluation(evaluation);
+      // Değerlendirme durumu değişince rapor durumu da (in_review/completed/
+      // disqualified) sunucuda otomatik türetiliyor — ikisini de tazelemek gerekir.
+      await Promise.all([refreshEvaluations(), refreshReports()]);
+      toast.success(status === "draft" ? "Taslak kaydedildi." : "Değerlendirme tamamlandı.");
+      if (status === "submitted") {
+        router.push("/judge");
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Değerlendirme kaydedilemedi.");
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -584,7 +591,7 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
     ]);
   }
 
-  if (isLoading || !report) {
+  if (isLoading) {
     return (
       <>
         <AppHeader subtitle="Değerlendirme" />
@@ -595,6 +602,25 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
               <Skeleton className="h-[600px] w-full" />
               <Skeleton className="h-[600px] w-full" />
             </div>
+          </main>
+        </div>
+      </>
+    );
+  }
+
+  if (!report) {
+    return (
+      <>
+        <AppHeader subtitle="Değerlendirme" />
+        <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center">
+          <main className="mx-auto max-w-md px-6 py-8 text-center">
+            <h1 className="text-xl font-semibold tracking-tight">Rapor bulunamadı</h1>
+            <p className="mt-2 text-base text-muted-foreground">
+              Bu rapor artık mevcut değil ya da sana atanmamış olabilir.
+            </p>
+            <Button className="mt-6" onClick={() => router.push("/judge")}>
+              Hakem paneline dön
+            </Button>
           </main>
         </div>
       </>

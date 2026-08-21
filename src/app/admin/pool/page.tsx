@@ -39,6 +39,7 @@ import {
 } from "@/components/ui/dialog";
 import { useAppStore } from "@/store/useAppStore";
 import * as reportsService from "@/services/reports.service";
+import { refreshReports } from "@/services/sync";
 import { ReportTimeline } from "@/components/report-timeline";
 import { aggregateEvaluations } from "@/lib/scoring";
 import type { ReportStatus } from "@/types";
@@ -181,6 +182,7 @@ export default function AdminPoolPage() {
     setAssigning(true);
     try {
       await reportsService.assignReports(pendingAssignment.reportIds, pendingAssignment.judgeId);
+      await refreshReports();
       const judge = judges.find((j) => j.id === pendingAssignment.judgeId);
       toast.success(`${pendingAssignment.label} ${judge?.name ?? "hakeme"} atandı.`);
       setPendingAssignment(null);
@@ -196,6 +198,7 @@ export default function AdminPoolPage() {
   async function handleUnassign(reportId: string, judgeId: string) {
     try {
       await reportsService.unassignJudge(reportId, judgeId);
+      await refreshReports();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Atama kaldırılamadı.");
     }
@@ -237,6 +240,7 @@ export default function AdminPoolPage() {
 
     try {
       await Promise.all(assignments);
+      await refreshReports();
       toast.success(`${assignments.length} rapor otomatik olarak atandı.`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Otomatik atama başarısız oldu.");
