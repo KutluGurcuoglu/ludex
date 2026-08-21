@@ -1,0 +1,1200 @@
+﻿"use client";
+
+import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import { Document, Page, pdfjs } from "react-pdf";
+import "react-pdf/dist/Page/AnnotationLayer.css";
+import "react-pdf/dist/Page/TextLayer.css";
+import {
+  AlertOctagon,
+  Bot,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  Flag,
+  LayoutGrid,
+  List,
+  Loader2,
+  Send,
+  ShieldAlert,
+  Sparkles,
+  ThumbsDown,
+  ThumbsUp,
+  XCircle,
+} from "lucide-react";
+import { AppHeader } from "@/components/layout/app-header";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Separator } from "@/components/ui/separator";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
+import { useAppStore, useCurrentUser } from "@/store/useAppStore";
+import * as reportsService from "@/services/reports.service";
+import * as evaluationsService from "@/services/evaluations.service";
+import * as aiAnalysisService from "@/services/ai-analysis.service";
+import { simulateNetworkDelay } from "@/services/delay";
+import type {
+  AIAnalysisResult,
+  ComplianceCheckItem,
+  CopilotChatMessage,
+  DisqualificationRecommendation,
+  Severity,
+} from "@/types";
+
+pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+
+const SEVERITY_LABEL: Record<Severity, string> = { low: "Düşük", medium: "Orta", high: "Yüksek" };
+
+const SEVERITY_CLASS: Record<Severity, string> = {
+  low: "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-300",
+  medium:
+    "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300",
+  high: "border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300",
+};
+
+async function simulateCopilotReply(question: string, analysis: AIAnalysisResult | null) {
+  const q = question.toLowerCase();
+
+  if (!analysis) {
+    return simulateNetworkDelay(
+      "Bu soruyu yanıtlayabilmem için önce LUDEX butonuna basıp analiz başlatman gerekiyor.",
+      600,
+      1200,
+    );
+  }
+
+  if (q.includes("şartname") || q.includes("sartname") || q.includes("kritik")) {
+    const reply =
+      analysis.criticalFindings.length > 0
+        ? `Sayfa ${analysis.evidences.find((e) => e.id === analysis.criticalFindings[0].evidenceId)?.page}'de belirtilen "${
+            analysis.criticalFindings[0].findingText
+          }" bulgusudur. Şartnamenin ilgili maddesi: "${analysis.criticalFindings[0].ruleText}"`
+        : "Bu raporda kritik bir şartname bulgusu tespit edilmedi.";
+    return simulateNetworkDelay(reply, 900, 1800);
+  }
+
+  if (q.includes("uygulanabilir")) {
+    const weakness = analysis.contentAnalysis.weaknesses[0];
+    const reply = weakness
+      ? `Uygulanabilirlik puanı, şu noktadan dolayı sınırlı görünüyor: "${weakness}"`
+      : "İçerik analizinde uygulanabilirliği düşüren belirgin bir zayıf yön bulunamadı.";
+    return simulateNetworkDelay(reply, 900, 1800);
+  }
+
+  if (q.includes("benzerlik")) {
+    const top = analysis.similarReports[0];
+    const reply = top
+      ? `Benzerlik oranı %${analysis.similarityScore}. En yakın eşleşme ${top.reportLabel} ile %${top.matchPercentage}. İlgili bölümü tekrar incelemeni öneririm.`
+      : "Bu rapor için benzerlik verisi henüz hazır değil.";
+    return simulateNetworkDelay(reply, 900, 1800);
+  }
+
+  if (q.includes("bayrak") || q.includes("flag")) {
+    const reply =
+      analysis.redFlags.length > 0
+        ? `Bu raporda ${analysis.redFlags.length} kırmızı bayrak var: ${analysis.redFlags
+            .map((f) => f.title)
+            .join(", ")}.`
+        : "Bu raporda herhangi bir kırmızı bayrak tespit edilmedi.";
+    return simulateNetworkDelay(reply, 900, 1800);
+  }
+
+  if (q.includes("puan") || q.includes("skor")) {
+    const reply =
+      analysis.suggestedScore != null
+        ? `Ludex'in önerdiği puan ${analysis.suggestedScore}. Kendi puanlamanı bununla karşılaştırabilirsin.`
+        : "Henüz bir puan önerisi yok.";
+    return simulateNetworkDelay(reply, 900, 1800);
+  }
+
+  return simulateNetworkDelay(
+    "Bu konuda elimde daha fazla detay yok, ama rapor içeriğine ve analiz sonuçlarına göz atmanı öneririm.",
+    900,
+    1800,
+  );
+}
+
+function ComplianceRow({
+  item,
+  analysis,
+  onEvidence,
+  compact = false,
+}: {
+  item: ComplianceCheckItem;
+  analysis: AIAnalysisResult;
+  onEvidence: (id: string) => void;
+  compact?: boolean;
+}) {
+  if (compact) {
+    return (
+      <div className="flex items-center gap-3 border-b border-border/60 py-2 last:border-0">
+        {item.passed ? (
+          <CheckCircle2 className="size-4 shrink-0 text-emerald-500" />
+        ) : (
+          <XCircle className="size-4 shrink-0 text-red-500" />
+        )}
+        <p className="min-w-0 flex-1 truncate text-base font-medium">{item.label}</p>
+        {item.evidenceIds.length > 0 && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-auto shrink-0 px-2 text-sm"
+            onClick={() => onEvidence(item.evidenceIds[0])}
+          >
+            Kanıt
+          </Button>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-1 rounded-lg bg-muted/40 p-3">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-base font-medium">{item.label}</p>
+        {item.passed ? (
+          <CheckCircle2 className="size-4 shrink-0 text-emerald-500" />
+        ) : (
+          <XCircle className="size-4 shrink-0 text-red-500" />
+        )}
+      </div>
+      <p className="text-base text-muted-foreground">{item.detail}</p>
+      {item.evidenceIds.map((eid) => (
+        <Button
+          key={eid}
+          type="button"
+          variant="link"
+          size="sm"
+          className="h-auto p-0 text-base"
+          onClick={() => onEvidence(eid)}
+        >
+          Neden? (Sayfa {analysis.evidences.find((e) => e.id === eid)?.page})
+        </Button>
+      ))}
+    </div>
+  );
+}
+
+type AnalysisState =
+  | "idle"
+  | "checking"
+  | "awaiting-decision"
+  | "continuing"
+  | "done"
+  | "eliminated";
+
+const ANALYSIS_STEPS = [
+  "Dil ve şartname denetleniyor...",
+  "Şablon inceleniyor...",
+  "İçerik analiz ediliyor...",
+  "Kategori içi benzerlik taranıyor...",
+  "AI yazım riski değerlendiriliyor...",
+];
+
+export function EvaluationWorkspace({ reportId }: { reportId: string }) {
+  const router = useRouter();
+  const user = useCurrentUser();
+  const report = useAppStore((s) => s.reports.find((r) => r.id === reportId)) ?? null;
+  const categories = useAppStore((s) => s.categories);
+  const scoreCriteria = useAppStore((s) => s.scoreCriteria);
+  const evaluations = useAppStore((s) => s.evaluations);
+
+  const [isLoading, setIsLoading] = useState(true);
+  const [analysisState, setAnalysisState] = useState<AnalysisState>("idle");
+  const [analysis, setAnalysis] = useState<AIAnalysisResult | null>(null);
+  const [loadingStepIndex, setLoadingStepIndex] = useState(0);
+  const [copilotOpen, setCopilotOpen] = useState(false);
+  const [compactCompliance, setCompactCompliance] = useState(false);
+
+  const [numPages, setNumPages] = useState(0);
+  const [pageNumber, setPageNumber] = useState(1);
+  const [focusedEvidenceId, setFocusedEvidenceId] = useState<string | null>(null);
+
+  const existingEvaluation = useMemo(
+    () => evaluations.find((e) => e.reportId === reportId && e.judgeId === user?.id) ?? null,
+    [evaluations, reportId, user],
+  );
+
+  const [scores, setScores] = useState<Record<string, number>>({});
+  const [overallComment, setOverallComment] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const [findingDecisions, setFindingDecisions] = useState<Record<string, "flagged" | "dismissed">>(
+    {},
+  );
+  const [disqualification, setDisqualification] = useState<DisqualificationRecommendation | null>(
+    null,
+  );
+  const [pendingDecision, setPendingDecision] = useState<{
+    finding: AIAnalysisResult["criticalFindings"][number];
+    decision: "flagged" | "dismissed";
+  } | null>(null);
+
+  const [messages, setMessages] = useState<CopilotChatMessage[]>([
+    {
+      id: "welcome",
+      role: "assistant",
+      content:
+        'Merhaba! Analiz tamamlandığında bu rapor hakkındaki sorularını yanıtlayabilirim. Örneğin "en kritik şartname problemi nedir?" diye sorabilirsin.',
+      createdAt: new Date().toISOString(),
+    },
+  ]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatSending, setChatSending] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    Promise.all([
+      reportsService.getReports(),
+      evaluationsService.getEvaluations(),
+      evaluationsService.getScoreCriteria(),
+    ]).then(() => {
+      if (active) setIsLoading(false);
+    });
+    return () => {
+      active = false;
+    };
+  }, [reportId]);
+
+  useEffect(() => {
+    if (existingEvaluation) {
+      const map: Record<string, number> = {};
+      existingEvaluation.criteriaScores.forEach((cs) => {
+        map[cs.criterionId] = cs.score;
+      });
+      setScores(map);
+      setOverallComment(existingEvaluation.overallComment);
+      if (existingEvaluation.disqualificationRecommendation) {
+        setDisqualification(existingEvaluation.disqualificationRecommendation);
+        setFindingDecisions((prev) => ({
+          ...prev,
+          [existingEvaluation.disqualificationRecommendation!.findingId]: "flagged",
+        }));
+      }
+    }
+  }, [existingEvaluation]);
+
+  const maxTotalScore = useMemo(
+    () => scoreCriteria.reduce((sum, c) => sum + c.maxScore, 0),
+    [scoreCriteria],
+  );
+
+  const totalScore = useMemo(
+    () => scoreCriteria.reduce((sum, c) => sum + (scores[c.id] ?? 0), 0),
+    [scoreCriteria, scores],
+  );
+
+  const scoreDiff =
+    analysis?.suggestedScore != null ? totalScore - analysis.suggestedScore : null;
+
+  const languageComplianceItem: ComplianceCheckItem | null = analysis
+    ? {
+        id: "language-check",
+        label: "Rapor Dili",
+        passed: analysis.languageCheck.passed,
+        detail: `Tespit edilen dil: ${analysis.languageCheck.detectedLanguage} (beklenen: ${analysis.languageCheck.expectedLanguage}, güven: %${analysis.languageCheck.confidence})`,
+        evidenceIds: [],
+      }
+    : null;
+
+  const summaryCounts = useMemo(() => {
+    if (!analysis) return null;
+    return {
+      critical: analysis.criticalFindings.length,
+      highSimilarity: analysis.similarReports.filter((r) => r.matchPercentage >= 70).length,
+      formatProblems: analysis.templateCompliance.filter((c) => !c.passed).length,
+      improvements: analysis.contentAnalysis.improvementSuggestions.length,
+      strengths: analysis.contentAnalysis.strengths.length,
+    };
+  }, [analysis]);
+
+  async function runRemainingSteps() {
+    setAnalysisState("continuing");
+    for (let i = 1; i < ANALYSIS_STEPS.length; i++) {
+      setLoadingStepIndex(i);
+      await simulateNetworkDelay(null, 900, 1100);
+    }
+    setAnalysisState("done");
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: "analysis-ready",
+        role: "assistant",
+        content:
+          "Analiz tamamlandı. Şartname, şablon, içerik ve benzerlik sonuçlarını sağdaki panelde görebilirsin. Merak ettiğin bir şey varsa buradan sorabilirsin.",
+        createdAt: new Date().toISOString(),
+      },
+    ]);
+  }
+
+  async function handleStartAnalysis() {
+    setAnalysisState("checking");
+    setLoadingStepIndex(0);
+    await simulateNetworkDelay(null, 900, 1100);
+    const result = await aiAnalysisService.getAIAnalysis(reportId);
+    setAnalysis(result);
+
+    if (result && result.criticalFindings.length > 0) {
+      setAnalysisState("awaiting-decision");
+      return;
+    }
+
+    await runRemainingSteps();
+  }
+
+  useEffect(() => {
+    if (analysisState !== "awaiting-decision" || !analysis) return;
+    const findings = analysis.criticalFindings;
+    const allDecided = findings.every((f) => findingDecisions[f.id]);
+    if (!allDecided) return;
+
+    const anyFlagged = findings.some((f) => findingDecisions[f.id] === "flagged");
+    if (anyFlagged) {
+      setAnalysisState("eliminated");
+      toast.warning(
+        "Elenme önerildiği için kalan analiz aşamaları (şablon, içerik, benzerlik, AI yazım riski) atlandı.",
+      );
+    } else {
+      runRemainingSteps();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [analysisState, analysis, findingDecisions]);
+
+  function jumpToEvidence(evidenceId: string) {
+    const evidence = analysis?.evidences.find((e) => e.id === evidenceId);
+    if (!evidence) return;
+    setPageNumber(evidence.page);
+    setFocusedEvidenceId(evidenceId);
+  }
+
+  function requestFindingDecision(
+    finding: AIAnalysisResult["criticalFindings"][number],
+    decision: "flagged" | "dismissed",
+  ) {
+    setPendingDecision({ finding, decision });
+  }
+
+  function confirmPendingDecision() {
+    if (!pendingDecision) return;
+    const { finding, decision } = pendingDecision;
+
+    setFindingDecisions((prev) => ({ ...prev, [finding.id]: decision }));
+    if (decision === "flagged") {
+      setDisqualification({
+        findingId: finding.id,
+        ruleText: finding.ruleText,
+        findingText: finding.findingText,
+        evidenceId: finding.evidenceId,
+        decidedAt: new Date().toISOString(),
+      });
+      toast.warning("Eleme önerisi kaydedildi. Nihai karar değerlendirmeyi kaydettiğinde işlenecek.");
+    } else {
+      toast.info("İncelemeye devam ediliyor.");
+    }
+    setPendingDecision(null);
+  }
+
+  function handleScoreChange(criterionId: string, maxScore: number, raw: string) {
+    const value = Math.max(0, Math.min(maxScore, Number(raw) || 0));
+    setScores((prev) => ({ ...prev, [criterionId]: value }));
+  }
+
+  async function persistEvaluation(status: "draft" | "submitted") {
+    if (!user || !report) return;
+    setSaving(true);
+
+    const evaluation = {
+      id: existingEvaluation?.id ?? `eval-${report.id}-${user.id}`,
+      reportId: report.id,
+      judgeId: user.id,
+      criteriaScores: scoreCriteria.map((c) => ({
+        criterionId: c.id,
+        score: scores[c.id] ?? 0,
+      })),
+      totalScore,
+      overallComment,
+      status,
+      disqualificationRecommendation: disqualification,
+      updatedAt: new Date().toISOString(),
+    };
+
+    await evaluationsService.saveEvaluation(evaluation);
+    setSaving(false);
+
+    toast.success(status === "draft" ? "Taslak kaydedildi." : "Değerlendirme tamamlandı.");
+    if (status === "submitted") {
+      router.push("/judge");
+    }
+  }
+
+  async function handleSendChat(e: FormEvent) {
+    e.preventDefault();
+    const text = chatInput.trim();
+    if (!text) return;
+
+    setMessages((prev) => [
+      ...prev,
+      { id: `msg-${Date.now()}`, role: "user", content: text, createdAt: new Date().toISOString() },
+    ]);
+    setChatInput("");
+    setChatSending(true);
+
+    const reply = await simulateCopilotReply(text, analysis);
+    setChatSending(false);
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: `msg-${Date.now()}-r`,
+        role: "assistant",
+        content: reply,
+        createdAt: new Date().toISOString(),
+      },
+    ]);
+  }
+
+  if (isLoading || !report) {
+    return (
+      <>
+        <AppHeader subtitle="Değerlendirme" />
+        <div className="min-h-[calc(100vh-4rem)]">
+          <main className="w-full px-6 py-8 md:px-12">
+            <Skeleton className="h-8 w-72" />
+            <div className="mt-6 grid gap-6 lg:grid-cols-[7fr_3fr]">
+              <Skeleton className="h-[600px] w-full" />
+              <Skeleton className="h-[600px] w-full" />
+            </div>
+          </main>
+        </div>
+      </>
+    );
+  }
+
+  const category = categories.find((c) => c.id === report.categoryId);
+
+  return (
+    <>
+      <AppHeader subtitle="Değerlendirme" />
+      <div className="min-h-[calc(100vh-4rem)]">
+        <main className="w-full px-6 py-6 md:px-12">
+          <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h1 className="text-xl font-semibold tracking-tight">{report.title}</h1>
+              <p className="mt-1 text-base text-muted-foreground">
+                {report.contestantName} &middot; {category?.name ?? "Kategori"}
+              </p>
+            </div>
+            <Button variant="ghost" size="sm" onClick={() => router.push("/judge")}>
+              ← Panele Dön
+            </Button>
+          </div>
+
+          <div className="grid gap-6 lg:grid-cols-[7fr_3fr]">
+            {/* SOL: PDF (%70) */}
+            <Card className="flex h-[calc(100vh-100px)] flex-col overflow-hidden py-0">
+              <div className="flex items-center justify-between border-b border-border/60 px-4 py-3">
+                <span className="text-base font-medium">Yarışmacının Raporu (PDF)</span>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="icon-sm"
+                    disabled={pageNumber <= 1}
+                    onClick={() => setPageNumber((p) => Math.max(1, p - 1))}
+                  >
+                    <ChevronLeft className="size-4" />
+                  </Button>
+                  <span className="text-base whitespace-nowrap text-muted-foreground">
+                    {pageNumber} / {numPages || "–"}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="icon-sm"
+                    disabled={pageNumber >= numPages}
+                    onClick={() => setPageNumber((p) => Math.min(numPages, p + 1))}
+                  >
+                    <ChevronRight className="size-4" />
+                  </Button>
+                </div>
+              </div>
+              <div className="flex-1 overflow-auto bg-muted/40 p-4">
+                <Document
+                  file={report.pdfUrl}
+                  onLoadSuccess={({ numPages: n }) => setNumPages(n)}
+                  loading={<Skeleton className="mx-auto h-[500px] w-full max-w-sm" />}
+                  error={
+                    <p className="p-6 text-center text-base text-muted-foreground">
+                      PDF yüklenemedi.
+                    </p>
+                  }
+                  className="mx-auto flex justify-center"
+                >
+                  <Page pageNumber={pageNumber} width={420} renderAnnotationLayer={false} />
+                </Document>
+              </div>
+            </Card>
+
+            {/* SAĞ: Ludex analizleri + hakem değerlendirmesi (%30) */}
+            <div className="h-[calc(100vh-100px)] overflow-y-auto pr-1">
+              <div className="space-y-6">
+                {analysisState === "idle" && (
+                  <Card>
+                    <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
+                      <div className="flex size-14 items-center justify-center rounded-2xl bg-gradient-to-br from-primary to-primary/70 text-primary-foreground shadow-lg shadow-primary/25">
+                        <Sparkles className="size-7" />
+                      </div>
+                      <div>
+                        <p className="text-base font-semibold">Ludex analizi henüz başlatılmadı</p>
+                        <p className="mt-1 max-w-xs text-base text-muted-foreground">
+                          Şartname, şablon, içerik ve benzerlik analizini başlatmak için aşağıdaki
+                          butona bas.
+                        </p>
+                      </div>
+                      <Button
+                        onClick={handleStartAnalysis}
+                        className="mt-2 gap-2 transition-transform active:scale-[0.98]"
+                      >
+                        <Sparkles className="size-4" />
+                        Ludex Analizine Başla
+                      </Button>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {(analysisState === "checking" || analysisState === "continuing") && (
+                  <Card>
+                    <CardContent className="flex flex-col items-center gap-4 py-12 text-center">
+                      <Loader2 className="size-8 animate-spin text-primary" />
+                      <div className="space-y-1.5">
+                        {ANALYSIS_STEPS.map((step, i) => (
+                          <p
+                            key={step}
+                            className={
+                              i === loadingStepIndex
+                                ? "text-base font-medium text-foreground"
+                                : i < loadingStepIndex
+                                  ? "text-base text-muted-foreground line-through"
+                                  : "text-base text-muted-foreground/40"
+                            }
+                          >
+                            {step}
+                          </p>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {analysis && analysis.criticalFindings.length > 0 && (
+                  <div className="animate-in fade-in-0 slide-in-from-bottom-2 space-y-4 duration-500">
+                    {languageComplianceItem && (
+                      <Card>
+                        <CardContent className="pt-6">
+                          <ComplianceRow
+                            item={languageComplianceItem}
+                            analysis={analysis}
+                            onEvidence={jumpToEvidence}
+                          />
+                        </CardContent>
+                      </Card>
+                    )}
+
+                    {analysisState === "awaiting-decision" && (
+                      <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-base text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300">
+                        Şartname denetimi tamamlandı. Kalan analiz aşamalarına geçmeden önce aşağıdaki
+                        kritik bulgu(lar) için karar ver.
+                      </p>
+                    )}
+
+                    {analysisState === "eliminated" && (
+                      <Alert variant="destructive" className="border-red-300 dark:border-red-900">
+                        <AlertOctagon className="size-4" />
+                        <AlertTitle>Analiz durduruldu</AlertTitle>
+                        <AlertDescription>
+                          Elenme önerildiği için şablon, içerik, benzerlik ve AI yazım riski
+                          aşamaları çalıştırılmadı.
+                        </AlertDescription>
+                      </Alert>
+                    )}
+
+                    {analysis.criticalFindings.map((finding) => {
+                      const decision = findingDecisions[finding.id];
+                      return (
+                        <Card key={finding.id} className="border-red-300 dark:border-red-900">
+                          <CardHeader>
+                            <CardTitle className="flex items-center gap-2 text-base text-red-700 dark:text-red-400">
+                              <AlertOctagon className="size-4" />
+                              KRİTİK ŞARTNAME BULGUSU
+                            </CardTitle>
+                          </CardHeader>
+                          <CardContent className="space-y-3">
+                            <div>
+                              <p className="text-base font-medium text-muted-foreground">Şartname kuralı</p>
+                              <p className="text-base">{finding.ruleText}</p>
+                            </div>
+                            <div>
+                              <p className="text-base font-medium text-muted-foreground">Rapor bulgusu</p>
+                              <p className="text-base">{finding.findingText}</p>
+                            </div>
+                            <Button
+                              type="button"
+                              variant="link"
+                              size="sm"
+                              className="h-auto p-0 text-base"
+                              onClick={() => jumpToEvidence(finding.evidenceId)}
+                            >
+                              Kanıt: Rapor, Sayfa {analysis.evidences.find((e) => e.id === finding.evidenceId)?.page}
+                            </Button>
+                            <div className="flex items-center justify-between rounded-lg bg-muted/50 px-3 py-2 text-base">
+                              <span className="text-muted-foreground">AI değerlendirmesi</span>
+                              <Badge variant="outline" className={SEVERITY_CLASS[finding.probability]}>
+                                Şartnameye aykırılık ihtimali: {SEVERITY_LABEL[finding.probability]}
+                              </Badge>
+                            </div>
+
+                            {decision ? (
+                              <p className="text-base font-medium text-muted-foreground">
+                                {decision === "flagged"
+                                  ? "Elemeyi önerdin — bu karar değerlendirme kaydına eklenecek."
+                                  : "İncelemeye devam etmeyi seçtin."}
+                              </p>
+                            ) : (
+                              <div className="flex gap-2">
+                                <Button
+                                  type="button"
+                                  variant="destructive"
+                                  size="sm"
+                                  className="flex-1 gap-1.5"
+                                  onClick={() => requestFindingDecision(finding, "flagged")}
+                                >
+                                  <ThumbsDown className="size-4" />
+                                  ELEMEYİ ÖNER
+                                </Button>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  className="flex-1 gap-1.5"
+                                  onClick={() => requestFindingDecision(finding, "dismissed")}
+                                >
+                                  <ThumbsUp className="size-4" />
+                                  İNCELEMEYE DEVAM ET
+                                </Button>
+                              </div>
+                            )}
+                          </CardContent>
+                        </Card>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {analysisState === "done" && analysis && summaryCounts && (
+                  <div className="animate-in fade-in-0 slide-in-from-bottom-2 space-y-6 duration-500">
+                    <Card className="border-primary/30 bg-primary/5">
+                      <CardHeader>
+                        <CardTitle className="text-base">Ludex Özeti</CardTitle>
+                        <CardDescription>Bu raporda özellikle dikkat etmen gerekenler.</CardDescription>
+                      </CardHeader>
+                      <CardContent className="flex flex-wrap gap-2">
+                        <Badge variant="outline" className={SEVERITY_CLASS.high}>
+                          {summaryCounts.critical} Kritik Şartname Bulgusu
+                        </Badge>
+                        <Badge variant="outline" className={SEVERITY_CLASS.medium}>
+                          {summaryCounts.highSimilarity} Yüksek Benzerlik
+                        </Badge>
+                        <Badge variant="outline" className={SEVERITY_CLASS.low}>
+                          {summaryCounts.formatProblems} Format Problemi
+                        </Badge>
+                        <Badge variant="secondary">{summaryCounts.improvements} Geliştirilebilir Alan</Badge>
+                        <Badge variant="secondary" className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-400">
+                          {summaryCounts.strengths} Güçlü Alan
+                        </Badge>
+                      </CardContent>
+                    </Card>
+
+                    <div className="flex items-center justify-end gap-1">
+                      <Button
+                        type="button"
+                        variant={compactCompliance ? "ghost" : "secondary"}
+                        size="icon-sm"
+                        aria-label="Kutu görünümü"
+                        onClick={() => setCompactCompliance(false)}
+                      >
+                        <LayoutGrid className="size-4" />
+                      </Button>
+                      <Button
+                        type="button"
+                        variant={compactCompliance ? "secondary" : "ghost"}
+                        size="icon-sm"
+                        aria-label="Liste görünümü"
+                        onClick={() => setCompactCompliance(true)}
+                      >
+                        <List className="size-4" />
+                      </Button>
+                    </div>
+
+                    <Card className="overflow-hidden py-0">
+                      <ScrollArea className="max-h-[420px] px-4 py-4">
+                        <Accordion
+                          type="multiple"
+                          defaultValue={["language", "spec"]}
+                          className="space-y-2"
+                        >
+                          <AccordionItem value="language" className="rounded-lg border border-border px-3">
+                            <AccordionTrigger className="text-base font-medium hover:no-underline">
+                              Aşama 1 – Dil Tespiti
+                            </AccordionTrigger>
+                            <AccordionContent className="space-y-2">
+                              {languageComplianceItem && (
+                                <ComplianceRow
+                                  item={languageComplianceItem}
+                                  analysis={analysis}
+                                  onEvidence={jumpToEvidence}
+                                  compact={compactCompliance}
+                                />
+                              )}
+                            </AccordionContent>
+                          </AccordionItem>
+
+                          <AccordionItem value="spec" className="rounded-lg border border-border px-3">
+                            <AccordionTrigger className="text-base font-medium hover:no-underline">
+                              Aşama 2 – Şartname Denetimi
+                            </AccordionTrigger>
+                            <AccordionContent className="space-y-2">
+                              {analysis.specCompliance.map((item) => (
+                                <ComplianceRow
+                                  key={item.id}
+                                  item={item}
+                                  analysis={analysis}
+                                  onEvidence={jumpToEvidence}
+                                compact={compactCompliance}
+                                />
+                              ))}
+                            </AccordionContent>
+                          </AccordionItem>
+
+                          <AccordionItem value="template" className="rounded-lg border border-border px-3">
+                            <AccordionTrigger className="text-base font-medium hover:no-underline">
+                              Aşama 3 – Şablon Denetimi
+                            </AccordionTrigger>
+                            <AccordionContent className="space-y-2">
+                              {analysis.templateCompliance.map((item) => (
+                                <ComplianceRow
+                                  key={item.id}
+                                  item={item}
+                                  analysis={analysis}
+                                  onEvidence={jumpToEvidence}
+                                compact={compactCompliance}
+                                />
+                              ))}
+                            </AccordionContent>
+                          </AccordionItem>
+
+                          <AccordionItem value="content" className="rounded-lg border border-border px-3">
+                            <AccordionTrigger className="text-base font-medium hover:no-underline">
+                              Aşama 4 – Proje ve İçerik Analizi
+                            </AccordionTrigger>
+                            <AccordionContent className="space-y-3">
+                              <p className="text-base text-muted-foreground">
+                                {analysis.contentAnalysis.summary}
+                              </p>
+                              <div>
+                                <p className="mb-1 text-base font-semibold text-emerald-700 dark:text-emerald-400">
+                                  Güçlü Yönler
+                                </p>
+                                <ul className="list-inside list-disc space-y-0.5 text-base text-muted-foreground">
+                                  {analysis.contentAnalysis.strengths.map((s) => (
+                                    <li key={s}>{s}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                              <div>
+                                <p className="mb-1 text-base font-semibold text-red-700 dark:text-red-400">
+                                  Zayıf Yönler
+                                </p>
+                                <ul className="list-inside list-disc space-y-0.5 text-base text-muted-foreground">
+                                  {analysis.contentAnalysis.weaknesses.map((s) => (
+                                    <li key={s}>{s}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                              <div>
+                                <p className="mb-1 text-base font-semibold text-primary">
+                                  Geliştirme Önerileri
+                                </p>
+                                <ul className="list-inside list-disc space-y-0.5 text-base text-muted-foreground">
+                                  {analysis.contentAnalysis.improvementSuggestions.map((s) => (
+                                    <li key={s}>{s}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            </AccordionContent>
+                          </AccordionItem>
+
+                          <AccordionItem value="similarity" className="rounded-lg border border-border px-3">
+                            <AccordionTrigger className="text-base font-medium hover:no-underline">
+                              Aşama 5 – Kategori Uygunluğu ve Benzerlik (%{analysis.similarityScore})
+                            </AccordionTrigger>
+                            <AccordionContent className="space-y-3">
+                              <ComplianceRow
+                                item={{
+                                  id: "category-fit-check",
+                                  label: "Kategori Uygunluğu",
+                                  passed: analysis.categoryFitCheck.passed,
+                                  detail: `${analysis.categoryFitCheck.explanation} (uyum skoru: %${analysis.categoryFitCheck.matchScore})`,
+                                  evidenceIds: [],
+                                }}
+                                analysis={analysis}
+                                onEvidence={jumpToEvidence}
+                              compact={compactCompliance}
+                              />
+                              {analysis.similarReports.map((match) => (
+                                <div key={match.id} className="space-y-2 rounded-lg bg-muted/40 p-3">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <p className="text-base font-medium">{match.reportLabel}</p>
+                                    <span className="text-base font-semibold text-primary">
+                                      %{match.matchPercentage}
+                                    </span>
+                                  </div>
+                                  {match.breakdown.length > 0 && (
+                                    <div className="space-y-1">
+                                      {match.breakdown.map((b) => (
+                                        <div
+                                          key={b.sectionLabel}
+                                          className="flex items-center justify-between text-base"
+                                        >
+                                          <span className="text-muted-foreground">{b.sectionLabel}</span>
+                                          <span>%{b.matchPercentage}</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </AccordionContent>
+                          </AccordionItem>
+
+                          <AccordionItem value="writing-risk" className="rounded-lg border border-border px-3">
+                            <AccordionTrigger className="text-base font-medium hover:no-underline">
+                              Aşama 6 – AI Yazım Riski ({SEVERITY_LABEL[analysis.aiWritingRisk.verdict]})
+                            </AccordionTrigger>
+                            <AccordionContent className="space-y-2">
+                              <Badge variant="outline" className={SEVERITY_CLASS[analysis.aiWritingRisk.verdict]}>
+                                AI kullanımına işaret eden sinyaller: {SEVERITY_LABEL[analysis.aiWritingRisk.verdict]}
+                              </Badge>
+                              <p className="text-base text-muted-foreground">
+                                {analysis.aiWritingRisk.explanation}
+                              </p>
+                              {analysis.aiWritingRisk.flaggedSections.length > 0 && (
+                                <ul className="list-inside list-disc space-y-0.5 text-base text-muted-foreground">
+                                  {analysis.aiWritingRisk.flaggedSections.map((f) => (
+                                    <li key={`${f.page}-${f.note}`}>
+                                      Sayfa {f.page} – {f.note}
+                                    </li>
+                                  ))}
+                                </ul>
+                              )}
+                              <p className="text-base italic text-muted-foreground">
+                                Bu kesin bir AI tespiti değildir; yalnızca ek inceleme için bir işarettir.
+                              </p>
+                            </AccordionContent>
+                          </AccordionItem>
+                        </Accordion>
+
+                        {focusedEvidenceId && (
+                          <div className="mt-4 rounded-lg border border-primary/30 bg-primary/5 p-3">
+                            <p className="text-base font-medium text-primary">
+                              Kanıt (Sayfa {analysis.evidences.find((e) => e.id === focusedEvidenceId)?.page})
+                            </p>
+                            <p className="mt-1 text-base text-muted-foreground italic">
+                              &ldquo;{analysis.evidences.find((e) => e.id === focusedEvidenceId)?.excerpt}
+                              &rdquo;
+                            </p>
+                          </div>
+                        )}
+                      </ScrollArea>
+                    </Card>
+
+                    {analysis.redFlags.length > 0 && (
+                      <div className="space-y-3">
+                        <p className="flex items-center gap-2 text-base font-semibold text-red-600 dark:text-red-400">
+                          <Flag className="size-4" />
+                          Kırmızı Bayraklar ({analysis.redFlags.length})
+                        </p>
+                        {analysis.redFlags.map((flag) => (
+                          <Alert
+                            key={flag.id}
+                            variant="destructive"
+                            className="border-red-300 dark:border-red-900"
+                          >
+                            <AlertOctagon className="size-4" />
+                            <AlertTitle className="flex items-center justify-between gap-2">
+                              <span>{flag.title}</span>
+                              <Badge variant="outline" className={SEVERITY_CLASS[flag.severity]}>
+                                {SEVERITY_LABEL[flag.severity]}
+                              </Badge>
+                            </AlertTitle>
+                            <AlertDescription className="space-y-1.5">
+                              <p>{flag.description}</p>
+                              {flag.evidenceIds.map((eid) => (
+                                <Button
+                                  key={eid}
+                                  type="button"
+                                  variant="link"
+                                  size="sm"
+                                  className="h-auto p-0 text-base"
+                                  onClick={() => jumpToEvidence(eid)}
+                                >
+                                  Neden? (Sayfa {analysis.evidences.find((e) => e.id === eid)?.page})
+                                </Button>
+                              ))}
+                            </AlertDescription>
+                          </Alert>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">Hakemin Kendi Değerlendirmesi</CardTitle>
+                    <CardDescription>Ludex karar vermez; nihai puan ve karar sana ait.</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {scoreCriteria.map((criterion) => (
+                      <div key={criterion.id} className="space-y-1.5">
+                        <div className="flex items-center justify-between text-base">
+                          <Label htmlFor={`score-${criterion.id}`}>{criterion.label}</Label>
+                          <span className="text-base text-muted-foreground">/ {criterion.maxScore}</span>
+                        </div>
+                        <Input
+                          id={`score-${criterion.id}`}
+                          type="number"
+                          min={0}
+                          max={criterion.maxScore}
+                          value={scores[criterion.id] ?? 0}
+                          onChange={(e) =>
+                            handleScoreChange(criterion.id, criterion.maxScore, e.target.value)
+                          }
+                        />
+                      </div>
+                    ))}
+
+                    <Separator />
+
+                    <div className="flex items-center justify-between rounded-lg bg-muted/50 px-3 py-2">
+                      <span className="text-base font-medium">Toplam</span>
+                      <span className="text-lg font-bold text-primary">
+                        {totalScore} / {maxTotalScore}
+                      </span>
+                    </div>
+
+                    {analysis?.suggestedScore != null && (
+                      <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2 text-base">
+                        <span className="flex items-center gap-1.5 text-muted-foreground">
+                          <Sparkles className="size-3.5" />
+                          Ludex önerisi: {analysis.suggestedScore}
+                        </span>
+                        {scoreDiff !== null && (
+                          <span
+                            className={
+                              scoreDiff === 0
+                                ? "text-muted-foreground"
+                                : scoreDiff > 0
+                                  ? "text-emerald-600 dark:text-emerald-400"
+                                  : "text-red-600 dark:text-red-400"
+                            }
+                          >
+                            {scoreDiff > 0 ? "+" : ""}
+                            {scoreDiff} fark
+                          </span>
+                        )}
+                      </div>
+                    )}
+
+                    {scoreDiff !== null && Math.abs(scoreDiff) >= 15 && (
+                      <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-base text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300">
+                        <ShieldAlert className="mt-0.5 size-3.5 shrink-0" />
+                        Ludex değerlendirmesi ile kendi değerlendirmen arasında anlamlı fark var.
+                      </div>
+                    )}
+
+                    <div className="space-y-1.5">
+                      <Label htmlFor="overall-comment">Genel Yorum</Label>
+                      <Textarea
+                        id="overall-comment"
+                        rows={3}
+                        value={overallComment}
+                        onChange={(e) => setOverallComment(e.target.value)}
+                        placeholder="Genel değerlendirmen..."
+                      />
+                    </div>
+
+                    <div className="flex gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="flex-1 gap-1.5"
+                        disabled={saving}
+                        onClick={() => persistEvaluation("draft")}
+                      >
+                        {saving && <Loader2 className="size-4 animate-spin" />}
+                        Taslak Kaydet
+                      </Button>
+                      <Button
+                        type="button"
+                        className="flex-1 gap-1.5"
+                        disabled={saving}
+                        onClick={() => persistEvaluation("submitted")}
+                      >
+                        {saving ? (
+                          <Loader2 className="size-4 animate-spin" />
+                        ) : (
+                          <CheckCircle2 className="size-4" />
+                        )}
+                        Tamamla
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+          </div>
+        </main>
+      </div>
+
+      <Button
+        type="button"
+        size="icon"
+        onClick={() => setCopilotOpen(true)}
+        className="fixed right-6 bottom-6 z-40 size-14 rounded-full shadow-[0_8px_30px_rgb(0,0,0,0.2)] transition-all active:scale-[0.95]"
+      >
+        <Bot className="size-6" />
+        <span className="sr-only">Ludex Copilot&apos;u aç</span>
+      </Button>
+
+      <Sheet open={copilotOpen} onOpenChange={setCopilotOpen}>
+        <SheetContent side="right" className="flex flex-col p-0">
+          <SheetHeader className="border-b border-border/60">
+            <SheetTitle className="flex items-center gap-2">
+              <Bot className="size-4 text-primary" />
+              Ludex Copilot
+            </SheetTitle>
+            <SheetDescription>Rapor hakkında merak ettiğini sor.</SheetDescription>
+          </SheetHeader>
+          <ScrollArea className="flex-1 px-4">
+            <div className="space-y-3 py-2">
+              {messages.map((m) => (
+                <div key={m.id} className={m.role === "user" ? "text-right" : "text-left"}>
+                  <span
+                    className={`inline-block max-w-[85%] rounded-xl px-3 py-2 text-base ${
+                      m.role === "user"
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-muted text-foreground"
+                    }`}
+                  >
+                    {m.content}
+                  </span>
+                </div>
+              ))}
+              {chatSending && (
+                <div className="text-left">
+                  <span className="inline-flex items-center gap-1.5 rounded-xl bg-muted px-3 py-2 text-base text-muted-foreground">
+                    <Loader2 className="size-3 animate-spin" />
+                    Yazıyor...
+                  </span>
+                </div>
+              )}
+            </div>
+          </ScrollArea>
+          <form
+            onSubmit={handleSendChat}
+            className="flex items-center gap-2 border-t border-border/60 p-4"
+          >
+            <Input
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              placeholder="Bir soru sor..."
+              className="h-9"
+            />
+            <Button
+              type="submit"
+              size="icon"
+              className="rounded-full"
+              disabled={chatSending || !chatInput.trim()}
+            >
+              <Send className="size-4" />
+            </Button>
+          </form>
+        </SheetContent>
+      </Sheet>
+
+      <AlertDialog
+        open={pendingDecision !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingDecision(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {pendingDecision?.decision === "flagged"
+                ? "Elemeyi önermek istediğine emin misin?"
+                : "İncelemeye devam etmek istediğine emin misin?"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingDecision?.decision === "flagged"
+                ? "Bu karar değerlendirme kaydına eklenecek ve kalan analiz aşamaları (şablon, içerik, benzerlik, AI yazım riski) çalıştırılmayacak."
+                : "Bu bulguyu göz ardı edip Ludex analizinin kalan aşamalarına devam edilecek."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setPendingDecision(null)}>Vazgeç</AlertDialogCancel>
+            <AlertDialogAction
+              variant={pendingDecision?.decision === "flagged" ? "destructive" : "default"}
+              onClick={confirmPendingDecision}
+            >
+              Onayla
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  );
+}
