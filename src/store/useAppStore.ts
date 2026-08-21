@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
+import { hashPassword } from "@/lib/hash";
 import type {
   Category,
   CompetitionDocument,
@@ -137,14 +138,19 @@ const SEED_USERS: User[] = [
   },
 ];
 
-/** Demo amaçlı; gerçek bir backend'de asla düz metin şifre saklanmaz. */
+/**
+ * Demo amaçlı; gerçek bir backend'de şifreler sunucu tarafında, tuzlanmış ve yavaş bir
+ * algoritmayla (bcrypt/argon2) saklanır. Burada sadece localStorage'da düz metin durmasın
+ * diye SHA-256 hash'i tutuyoruz — bu değer, "demo1234" şifresinin SHA-256 hash'idir.
+ */
+const DEMO_PASSWORD_HASH = "0ead2060b65992dca4769af601a1b3a35ef38cfad2c2c465bb160ea764157c5d";
 const SEED_CREDENTIALS: Record<string, string> = {
-  "admin@ludex.com": "demo1234",
-  "elif.yilmaz@ludex.com": "demo1234",
-  "kaan.demir@ludex.com": "demo1234",
-  "mehmet.ozturk@example.com": "demo1234",
-  "zeynep.kaya@example.com": "demo1234",
-  "ali.vural@example.com": "demo1234",
+  "admin@ludex.com": DEMO_PASSWORD_HASH,
+  "elif.yilmaz@ludex.com": DEMO_PASSWORD_HASH,
+  "kaan.demir@ludex.com": DEMO_PASSWORD_HASH,
+  "mehmet.ozturk@example.com": DEMO_PASSWORD_HASH,
+  "zeynep.kaya@example.com": DEMO_PASSWORD_HASH,
+  "ali.vural@example.com": DEMO_PASSWORD_HASH,
 };
 
 const SEED_REPORTS: Report[] = [
@@ -253,14 +259,14 @@ export interface AppState {
   currentUserId: string | null;
   passwordResetRequest: PasswordResetRequest | null;
 
-  login: (email: string, password: string) => { success: boolean; error?: string };
+  login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   register: (input: {
     name: string;
     email: string;
     phone: string;
     password: string;
     role: Extract<UserRole, "contestant" | "judge">;
-  }) => { success: boolean; error?: string };
+  }) => Promise<{ success: boolean; error?: string }>;
   demoLogin: (role: UserRole) => void;
   logout: () => void;
 
@@ -300,16 +306,26 @@ export interface AppState {
     channel: "email" | "phone",
     identifier: string,
   ) => { success: boolean; error?: string; code?: string };
-  resetPassword: (code: string, newPassword: string) => { success: boolean; error?: string };
+  resetPassword: (code: string, newPassword: string) => Promise<{ success: boolean; error?: string }>;
   changePassword: (
     userId: string,
     currentPassword: string,
     newPassword: string,
-  ) => { success: boolean; error?: string };
+  ) => Promise<{ success: boolean; error?: string }>;
 
   submitJudgeApplication: (
     userId: string,
-    input: { categoryIds: string[]; workStatus: JudgeWorkStatus },
+    input: {
+      categoryIds: string[];
+      workStatus: JudgeWorkStatus;
+      jobTitle?: string;
+      department?: string;
+      expertiseArea?: string;
+      academicProfileUrl?: string;
+      cvFileName?: string;
+      customExpertiseTags?: string[];
+      agreementAccepted?: boolean;
+    },
   ) => void;
   reviewJudgeApplication: (
     userId: string,
@@ -327,6 +343,7 @@ export interface AppState {
   assignReports: (reportIds: string[], judgeId: string) => void;
   setReportStatus: (reportId: string, status: ReportStatus) => void;
   saveEvaluation: (evaluation: JudgeEvaluation) => void;
+  resolveDisqualification: (reportId: string, decision: "upheld" | "dismissed") => void;
 
   addCategory: (input: { name: string; description?: string }) => Category;
   updateCategory: (id: string, updates: Partial<Pick<Category, "name" | "description">>) => void;
@@ -357,12 +374,13 @@ export const useAppStore = create<AppState>()(
       currentUserId: null,
       passwordResetRequest: null,
 
-      login: (email, password) => {
+      login: async (email, password) => {
         const normalizedEmail = email.trim().toLowerCase();
         const { users, credentials } = get();
         const user = users.find((u) => u.email.toLowerCase() === normalizedEmail);
+        const hashed = await hashPassword(password);
 
-        if (!user || credentials[user.email] !== password) {
+        if (!user || credentials[user.email] !== hashed) {
           return { success: false, error: "E-posta veya şifre hatalı." };
         }
 
@@ -370,7 +388,7 @@ export const useAppStore = create<AppState>()(
         return { success: true };
       },
 
-      register: ({ name, email, phone, password, role }) => {
+      register: async ({ name, email, phone, password, role }) => {
         const normalizedEmail = email.trim().toLowerCase();
         const { users } = get();
 
@@ -379,7 +397,7 @@ export const useAppStore = create<AppState>()(
         }
 
         const newUser: User = {
-          id: `${role}-${Date.now()}`,
+          id: `${role}-${crypto.randomUUID()}`,
           name,
           email,
           phone,
@@ -388,10 +406,11 @@ export const useAppStore = create<AppState>()(
           createdAt: new Date().toISOString(),
           ...(role === "judge" ? { judgeApprovalStatus: "pending" as const } : {}),
         };
+        const hashed = await hashPassword(password);
 
         set((state) => ({
           users: [...state.users, newUser],
-          credentials: { ...state.credentials, [email]: password },
+          credentials: { ...state.credentials, [email]: hashed },
           currentUserId: newUser.id,
         }));
 
@@ -430,7 +449,7 @@ export const useAppStore = create<AppState>()(
         return { success: true, code };
       },
 
-      resetPassword: (code, newPassword) => {
+      resetPassword: async (code, newPassword) => {
         const request = get().passwordResetRequest;
 
         if (!request || request.expiresAt < Date.now()) {
@@ -445,33 +464,62 @@ export const useAppStore = create<AppState>()(
           return { success: false, error: "Kullanıcı bulunamadı." };
         }
 
+        const hashed = await hashPassword(newPassword);
         set((state) => ({
-          credentials: { ...state.credentials, [user.email]: newPassword },
+          credentials: { ...state.credentials, [user.email]: hashed },
           passwordResetRequest: null,
         }));
 
         return { success: true };
       },
 
-      changePassword: (userId, currentPassword, newPassword) => {
+      changePassword: async (userId, currentPassword, newPassword) => {
         const { users, credentials } = get();
         const user = users.find((u) => u.id === userId);
         if (!user) return { success: false, error: "Kullanıcı bulunamadı." };
-        if (credentials[user.email] !== currentPassword) {
+        if (credentials[user.email] !== (await hashPassword(currentPassword))) {
           return { success: false, error: "Mevcut şifren hatalı." };
         }
 
+        const hashed = await hashPassword(newPassword);
         set((state) => ({
-          credentials: { ...state.credentials, [user.email]: newPassword },
+          credentials: { ...state.credentials, [user.email]: hashed },
         }));
         return { success: true };
       },
 
-      submitJudgeApplication: (userId, { categoryIds, workStatus }) => {
+      submitJudgeApplication: (
+        userId,
+        {
+          categoryIds,
+          workStatus,
+          jobTitle,
+          department,
+          expertiseArea,
+          academicProfileUrl,
+          cvFileName,
+          customExpertiseTags,
+          agreementAccepted,
+        },
+      ) => {
         set((state) => ({
           users: state.users.map((u) =>
             u.id === userId
-              ? { ...u, categoryIds, judgeWorkStatus: workStatus, judgeApprovalStatus: "pending" }
+              ? {
+                  ...u,
+                  categoryIds,
+                  judgeWorkStatus: workStatus,
+                  judgeApprovalStatus: "pending",
+                  ...(jobTitle !== undefined ? { jobTitle } : {}),
+                  ...(department !== undefined ? { department } : {}),
+                  ...(expertiseArea !== undefined ? { expertiseArea } : {}),
+                  ...(academicProfileUrl !== undefined ? { academicProfileUrl } : {}),
+                  ...(cvFileName !== undefined ? { cvFileName } : {}),
+                  ...(customExpertiseTags !== undefined ? { customExpertiseTags } : {}),
+                  ...(agreementAccepted
+                    ? { judgeAgreementAcceptedAt: new Date().toISOString() }
+                    : {}),
+                }
               : u,
           ),
         }));
@@ -514,7 +562,7 @@ export const useAppStore = create<AppState>()(
 
       addReport: (input) => {
         const newReport: Report = {
-          id: `report-${Date.now()}`,
+          id: `report-${crypto.randomUUID()}`,
           title: input.title,
           contestantId: input.contestantId,
           categoryId: input.categoryId,
@@ -566,9 +614,32 @@ export const useAppStore = create<AppState>()(
         });
       },
 
+      resolveDisqualification: (reportId, decision) => {
+        const now = new Date().toISOString();
+        set((state) => ({
+          evaluations: state.evaluations.map((e) =>
+            e.reportId === reportId && e.disqualificationRecommendation
+              ? {
+                  ...e,
+                  disqualificationRecommendation: {
+                    ...e.disqualificationRecommendation,
+                    adminDecision: decision,
+                    adminDecidedAt: now,
+                  },
+                }
+              : e,
+          ),
+          reports: state.reports.map((r) =>
+            r.id === reportId && decision === "upheld"
+              ? { ...r, status: "disqualified" as const }
+              : r,
+          ),
+        }));
+      },
+
       addCategory: ({ name, description }) => {
         const newCategory: Category = {
-          id: `cat-${Date.now()}`,
+          id: `cat-${crypto.randomUUID()}`,
           name,
           slug: slugify(name),
           description,
@@ -602,7 +673,7 @@ export const useAppStore = create<AppState>()(
 
       addScoreCriterion: ({ label, maxScore, description }) => {
         const newCriterion: ScoreCriterion = {
-          id: `crit-${Date.now()}`,
+          id: `crit-${crypto.randomUUID()}`,
           label,
           maxScore,
           description,
@@ -625,8 +696,15 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: "ludex-storage",
+      /** Tarayıcı dışında (SSR, testler) sessizce hiçbir şey yapmayan bir depoya düşer; gerçek kalıcılık yalnızca istemcide gerçekleşir. */
       storage: createJSONStorage(() =>
-        typeof window !== "undefined" ? window.localStorage : (undefined as unknown as Storage),
+        typeof window !== "undefined"
+          ? window.localStorage
+          : {
+              getItem: () => null,
+              setItem: () => {},
+              removeItem: () => {},
+            },
       ),
     },
   ),

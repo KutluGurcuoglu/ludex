@@ -15,6 +15,14 @@ export function saveEvaluation(evaluation: JudgeEvaluation): Promise<void> {
   return simulateNetworkDelay(undefined);
 }
 
+export function resolveDisqualification(
+  reportId: string,
+  decision: "upheld" | "dismissed",
+): Promise<void> {
+  useAppStore.getState().resolveDisqualification(reportId, decision);
+  return simulateNetworkDelay(undefined);
+}
+
 export function addScoreCriterion(
   input: Parameters<AppState["addScoreCriterion"]>[0],
 ): Promise<ScoreCriterion> {

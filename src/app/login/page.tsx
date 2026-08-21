@@ -49,18 +49,18 @@ export default function LoginPage() {
   const [role, setRole] = useState<"contestant" | "judge">("contestant");
   const [registerError, setRegisterError] = useState<string | null>(null);
 
-  function handleLogin(e: FormEvent) {
+  async function handleLogin(e: FormEvent) {
     e.preventDefault();
     setLoginError(null);
-    const result = login(loginEmail, loginPassword);
+    const result = await login(loginEmail, loginPassword);
     if (!result.success) setLoginError(result.error ?? "Giriş başarısız.");
   }
 
-  function handleRegister(e: FormEvent) {
+  async function handleRegister(e: FormEvent) {
     e.preventDefault();
     setRegisterError(null);
 
-    const result = register({ name, email, phone, password, role });
+    const result = await register({ name, email, phone, password, role });
     if (!result.success) setRegisterError(result.error ?? "Kayıt başarısız.");
   }
 

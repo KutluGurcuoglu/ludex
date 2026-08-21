@@ -64,6 +64,16 @@ export interface User {
   // Hakem başvuru/onay bilgileri
   judgeApprovalStatus?: JudgeApprovalStatus;
   judgeWorkStatus?: JudgeWorkStatus;
+  /** Bölüm / uzmanlık dalı (Örn: Bilgisayar Mühendisliği) — jobTitle/department'tan ayrı. */
+  expertiseArea?: string;
+  /** LinkedIn profili veya akademik özgeçmiş (YÖK Akademik / Google Scholar) linki. */
+  academicProfileUrl?: string;
+  /** Başvuruda yüklenen CV dosyasının adı (demo amaçlı; dosya içeriği saklanmaz). */
+  cvFileName?: string;
+  /** Sabit kategori listesinde olmayan, kullanıcının kendi eklediği uzmanlık etiketleri. */
+  customExpertiseTags?: string[];
+  /** KVKK Aydınlatma Metni ve Hakemlik Sözleşmesi'nin onaylandığı zaman. */
+  judgeAgreementAcceptedAt?: string;
 
   // Bildirim tercihleri (varsayılan: açık)
   notifyReportAssigned?: boolean;
@@ -75,7 +85,8 @@ export type ReportStatus =
   | "pending_assignment" // Gönderildi, admin havuzunda bekliyor
   | "assigned" // Hakeme atandı, hakem henüz açmadı
   | "in_review" // Hakem değerlendirmeye başladı
-  | "completed"; // Hakem puanlamayı tamamladı
+  | "completed" // Hakem puanlamayı tamamladı
+  | "disqualified"; // Hakemin elenme önerisi admin tarafından onaylandı
 
 export interface Report {
   id: string;
@@ -219,8 +230,11 @@ export interface DisqualificationRecommendation {
   findingId: string;
   ruleText: string;
   findingText: string;
-  evidenceId: string;
+  evidenceId: string | null;
   decidedAt: string;
+  /** Admin'in hakemin elenme önerisi hakkındaki nihai kararı; admin henüz karar vermediyse boş. */
+  adminDecision?: "upheld" | "dismissed";
+  adminDecidedAt?: string;
 }
 
 export interface JudgeEvaluation {
