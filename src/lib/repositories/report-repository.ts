@@ -1,5 +1,6 @@
 import type { ReportStatus } from "@/types";
 import type { EvaluationOutput } from "@/lib/ai-evaluation/schema";
+import type { EvaluationRecord } from "@/lib/repositories/evaluation-repository";
 
 export interface ReportRecord {
   id: string;
@@ -28,17 +29,45 @@ export interface CreateReportInput {
 }
 
 /**
+ * Bir raporun durumunu, atanmış hakemlerin değerlendirme durumlarından
+ * türetir — status elle set edilmez (assignJudge/unassignJudge hâlâ
+ * pending_assignment<->assigned geçişini kendi başına yapar, ama bir kez
+ * değerlendirme verisi varsa bu fonksiyon otomatik olarak devreye girer).
+ * Kural, ekip aktarım notlarındaki sırayla birebir aynı:
+ *   1. Hiç hakem atanmadıysa -> pending_assignment
+ *   2. Herhangi bir değerlendirmede admin_decision=upheld varsa -> disqualified (her şeyi ezer)
+ *   3. Atanan hakemlerin HEPSİ submitted ise -> completed
+ *   4. En az biri submitted ama hepsi değilse -> in_review
+ *   5. Hiçbiri submitted değilse -> assigned
+ */
+export function deriveReportStatus(
+  assignedJudgeIds: string[],
+  evaluations: EvaluationRecord[]
+): ReportStatus {
+  if (assignedJudgeIds.length === 0) return "pending_assignment";
+
+  const hasUpheldDisqualification = evaluations.some(
+    (e) => e.disqualificationRecommendation?.adminDecision === "upheld"
+  );
+  if (hasUpheldDisqualification) return "disqualified";
+
+  const submittedJudgeIds = new Set(
+    evaluations.filter((e) => e.status === "submitted").map((e) => e.judgeId)
+  );
+  const allSubmitted = assignedJudgeIds.every((id) => submittedJudgeIds.has(id));
+  if (allSubmitted) return "completed";
+
+  const anySubmitted = assignedJudgeIds.some((id) => submittedJudgeIds.has(id));
+  if (anySubmitted) return "in_review";
+
+  return "assigned";
+}
+
+/**
  * Rapor kalıcılığı için port. Kullanıcı repository'siyle aynı desen:
  * şu an in-memory, feat/database-foundation'daki Prisma şeması hazır
  * olunca bu arayüzü değiştirmeden Prisma tabanlı bir implementasyonla
  * değiştireceğiz.
- *
- * NOT: status alanı şu an yalnızca atama sayısına göre türetiliyor
- * (hiç hakem yok -> pending_assignment, en az bir hakem var -> assigned).
- * Ekip aktarım notlarındaki tam türetme kuralı (in_review/completed/disqualified)
- * hakem değerlendirme gönderimi (POST /reports/:id/evaluations) inşa edilmeden
- * doğru şekilde uygulanamaz — o uç henüz yok, bu yüzden buraya yarım/yanlış bir
- * mantık eklenmedi.
  */
 export interface ReportRepository {
   create(input: CreateReportInput): Promise<ReportRecord>;

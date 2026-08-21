@@ -1,4 +1,18 @@
-import type { ScoreCriterion } from "@/types";
+import type { Category, ScoreCriterion } from "@/types";
+
+/**
+ * Frontend'deki useAppStore.ts'nin getEffectiveCriteria() ile birebir aynı
+ * kural: kategorinin kendi kriterleri varsa onlar, yoksa global varsayılan
+ * kriterler kullanılır. Katmanları karışık tutmamak için (backend'in
+ * frontend store'undan import etmesi yerine) burada küçük bir kopya olarak
+ * tutulur — mantık tek satır, senkron kalması kolay.
+ */
+export function getEffectiveCriteria(
+  category: Pick<Category, "criteria"> | null | undefined,
+  globalCriteria: ScoreCriterion[]
+): ScoreCriterion[] {
+  return category?.criteria && category.criteria.length > 0 ? category.criteria : globalCriteria;
+}
 
 export interface CreateScoreCriterionInput {
   label: string;
