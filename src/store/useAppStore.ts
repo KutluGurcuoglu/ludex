@@ -3,6 +3,7 @@ import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { hashPassword } from "@/lib/hash";
 import type {
+  AppNotification,
   Category,
   CompetitionDocument,
   JudgeApprovalStatus,
@@ -14,6 +15,17 @@ import type {
   User,
   UserRole,
 } from "@/types";
+
+function createNotification(
+  input: Omit<AppNotification, "id" | "createdAt" | "readAt">,
+): AppNotification {
+  return {
+    ...input,
+    id: `notif-${crypto.randomUUID()}`,
+    createdAt: new Date().toISOString(),
+    readAt: null,
+  };
+}
 
 function slugify(name: string) {
   return name
@@ -256,8 +268,12 @@ export interface AppState {
   credentials: Record<string, string>;
   reports: Report[];
   evaluations: JudgeEvaluation[];
+  notifications: AppNotification[];
   currentUserId: string | null;
   passwordResetRequest: PasswordResetRequest | null;
+
+  markNotificationRead: (id: string) => void;
+  markAllNotificationsRead: (userId: string) => void;
 
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   register: (input: {
@@ -371,6 +387,7 @@ export const useAppStore = create<AppState>()(
       credentials: SEED_CREDENTIALS,
       reports: SEED_REPORTS,
       evaluations: SEED_EVALUATIONS,
+      notifications: [],
       currentUserId: null,
       passwordResetRequest: null,
 
@@ -530,6 +547,33 @@ export const useAppStore = create<AppState>()(
           users: state.users.map((u) =>
             u.id === userId ? { ...u, judgeApprovalStatus: decision } : u,
           ),
+          notifications: [
+            createNotification({
+              userId,
+              kind: "judge_application_reviewed",
+              title:
+                decision === "approved" ? "Hakem başvurun onaylandı" : "Hakem başvurun reddedildi",
+              link: "/judge",
+            }),
+            ...state.notifications,
+          ],
+        }));
+      },
+
+      markNotificationRead: (id) => {
+        set((state) => ({
+          notifications: state.notifications.map((n) =>
+            n.id === id && !n.readAt ? { ...n, readAt: new Date().toISOString() } : n,
+          ),
+        }));
+      },
+
+      markAllNotificationsRead: (userId) => {
+        const now = new Date().toISOString();
+        set((state) => ({
+          notifications: state.notifications.map((n) =>
+            n.userId === userId && !n.readAt ? { ...n, readAt: now } : n,
+          ),
         }));
       },
 
@@ -581,13 +625,32 @@ export const useAppStore = create<AppState>()(
 
       assignReports: (reportIds, judgeId) => {
         const now = new Date().toISOString();
-        set((state) => ({
-          reports: state.reports.map((r) =>
-            reportIds.includes(r.id)
-              ? { ...r, assignedJudgeId: judgeId, status: "assigned", assignedAt: now }
-              : r,
-          ),
-        }));
+        set((state) => {
+          const judge = state.users.find((u) => u.id === judgeId);
+          const shouldNotify = judge && judge.notifyReportAssigned !== false;
+          const newNotifications = shouldNotify
+            ? state.reports
+                .filter((r) => reportIds.includes(r.id))
+                .map((r) =>
+                  createNotification({
+                    userId: judgeId,
+                    kind: "report_assigned",
+                    title: "Yeni rapor atandı",
+                    body: r.title,
+                    link: "/judge",
+                  }),
+                )
+            : [];
+
+          return {
+            reports: state.reports.map((r) =>
+              reportIds.includes(r.id)
+                ? { ...r, assignedJudgeId: judgeId, status: "assigned", assignedAt: now }
+                : r,
+            ),
+            notifications: [...newNotifications, ...state.notifications],
+          };
+        });
       },
 
       setReportStatus: (reportId, status) => {
@@ -620,31 +683,75 @@ export const useAppStore = create<AppState>()(
                 )
               : state.reports;
 
-          return { evaluations, reports };
+          let notifications = state.notifications;
+          if (evaluation.status === "submitted") {
+            const report = state.reports.find((r) => r.id === evaluation.reportId);
+            const contestant = report
+              ? state.users.find((u) => u.id === report.contestantId)
+              : null;
+            if (report && contestant && contestant.notifyEvaluationUpdates !== false) {
+              notifications = [
+                createNotification({
+                  userId: contestant.id,
+                  kind: "evaluation_completed",
+                  title: "Raporun değerlendirildi",
+                  body: `${report.title} · ${evaluation.totalScore} puan`,
+                  link: "/contestant",
+                }),
+                ...notifications,
+              ];
+            }
+          }
+
+          return { evaluations, reports, notifications };
         });
       },
 
       resolveDisqualification: (reportId, decision) => {
         const now = new Date().toISOString();
-        set((state) => ({
-          evaluations: state.evaluations.map((e) =>
-            e.reportId === reportId && e.disqualificationRecommendation
-              ? {
-                  ...e,
-                  disqualificationRecommendation: {
-                    ...e.disqualificationRecommendation,
-                    adminDecision: decision,
-                    adminDecidedAt: now,
-                  },
-                }
-              : e,
-          ),
-          reports: state.reports.map((r) =>
-            r.id === reportId && decision === "upheld"
-              ? { ...r, status: "disqualified" as const }
-              : r,
-          ),
-        }));
+        set((state) => {
+          const report = state.reports.find((r) => r.id === reportId);
+          const contestant = report
+            ? state.users.find((u) => u.id === report.contestantId)
+            : null;
+          const shouldNotify =
+            decision === "upheld" &&
+            report &&
+            contestant &&
+            contestant.notifyEvaluationUpdates !== false;
+
+          return {
+            evaluations: state.evaluations.map((e) =>
+              e.reportId === reportId && e.disqualificationRecommendation
+                ? {
+                    ...e,
+                    disqualificationRecommendation: {
+                      ...e.disqualificationRecommendation,
+                      adminDecision: decision,
+                      adminDecidedAt: now,
+                    },
+                  }
+                : e,
+            ),
+            reports: state.reports.map((r) =>
+              r.id === reportId && decision === "upheld"
+                ? { ...r, status: "disqualified" as const }
+                : r,
+            ),
+            notifications: shouldNotify
+              ? [
+                  createNotification({
+                    userId: contestant.id,
+                    kind: "report_disqualified",
+                    title: "Raporun elendi",
+                    body: report.title,
+                    link: "/contestant",
+                  }),
+                  ...state.notifications,
+                ]
+              : state.notifications,
+          };
+        });
       },
 
       addCategory: ({ name, description }) => {

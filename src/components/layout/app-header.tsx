@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { LogOut, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { NotificationBell } from "@/components/notification-bell";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   AlertDialog,
@@ -47,6 +48,7 @@ export function AppHeader({ subtitle }: { subtitle?: string } = {}) {
         </div>
 
         <div className="ml-auto flex items-center gap-3">
+          <NotificationBell />
           <ThemeToggle />
           <Button asChild variant="ghost" size="icon" className="size-8" aria-label="Ayarlar">
             <Link href="/settings">

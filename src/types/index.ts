@@ -251,6 +251,23 @@ export interface JudgeEvaluation {
   updatedAt: string;
 }
 
+export type NotificationKind =
+  | "report_assigned"
+  | "evaluation_completed"
+  | "report_disqualified"
+  | "judge_application_reviewed";
+
+export interface AppNotification {
+  id: string;
+  userId: string;
+  kind: NotificationKind;
+  title: string;
+  body?: string;
+  link?: string;
+  createdAt: string;
+  readAt: string | null;
+}
+
 export interface CopilotChatMessage {
   id: string;
   role: "user" | "assistant";

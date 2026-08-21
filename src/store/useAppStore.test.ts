@@ -116,4 +116,65 @@ describe("useAppStore", () => {
       "disqualified",
     );
   });
+
+  it("notifies the judge when a report is assigned to them", () => {
+    const report = useAppStore.getState().addReport({
+      contestantId: "contestant-1",
+      categoryId: "cat-yz",
+      title: "Bildirim testi raporu",
+      fileName: "n.pdf",
+      fileSizeBytes: 1000,
+      pdfUrl: "blob:test",
+    });
+
+    useAppStore.getState().assignReports([report.id], "judge-1");
+
+    const notification = useAppStore
+      .getState()
+      .notifications.find((n) => n.userId === "judge-1" && n.body === report.title);
+    expect(notification).toBeDefined();
+    expect(notification?.readAt).toBeNull();
+  });
+
+  it("notifies the contestant only when a disqualification is upheld, not dismissed", () => {
+    const report = useAppStore.getState().addReport({
+      contestantId: "contestant-1",
+      categoryId: "cat-yz",
+      title: "Elenme bildirim testi",
+      fileName: "n2.pdf",
+      fileSizeBytes: 1000,
+      pdfUrl: "blob:test",
+    });
+
+    useAppStore.getState().saveEvaluation({
+      id: `eval-${report.id}-judge-1`,
+      reportId: report.id,
+      judgeId: "judge-1",
+      criteriaScores: [],
+      totalScore: 0,
+      overallComment: "",
+      status: "submitted",
+      disqualificationRecommendation: {
+        findingId: "finding-x",
+        ruleText: "kural",
+        findingText: "bulgu",
+        evidenceId: null,
+        decidedAt: new Date(0).toISOString(),
+      },
+      updatedAt: new Date(0).toISOString(),
+    });
+
+    const findDisqualificationNotice = () =>
+      useAppStore
+        .getState()
+        .notifications.find(
+          (n) => n.userId === "contestant-1" && n.kind === "report_disqualified" && n.body === report.title,
+        );
+
+    useAppStore.getState().resolveDisqualification(report.id, "dismissed");
+    expect(findDisqualificationNotice()).toBeUndefined();
+
+    useAppStore.getState().resolveDisqualification(report.id, "upheld");
+    expect(findDisqualificationNotice()).toBeDefined();
+  });
 });
