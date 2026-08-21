@@ -1,0 +1,50 @@
+# Ludex — yerel backend geliştirme altyapısı (Aşama 2)
+#
+# Bu dosya yalnızca geliştirme ortamı içindir: PostgreSQL ve Mailpit'i
+# container'da çalıştırır. Next.js uygulaması bu aşamada Docker'a alınmıyor;
+# host makinede `npm run dev` ile çalışmaya devam eder (bkz. docs/backend-development.md).
+#
+# Gerçek değerler .env dosyasından okunur (.env.example üzerinden türetilir).
+# Bu dosyada hiçbir gerçek şifre/secret bulunmaz.
+
+services:
+  postgres:
+    image: postgres:16.3-alpine
+    container_name: ludex-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      # Host makinede başka bir PostgreSQL çalışıyor olabileceğinden
+      # varsayılan host portu 5433'tür; container içinde her zaman 5432 dinlenir.
+      - "${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - ludex_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  mailpit:
+    image: axllent/mailpit:v1.30.7
+    container_name: ludex-mailpit
+    restart: unless-stopped
+    ports:
+      - "${MAILPIT_SMTP_PORT:-1025}:1025"
+      - "${MAILPIT_WEB_PORT:-8025}:8025"
+    healthcheck:
+      # Mailpit imajı /mailpit readyz komutunu içerir, ek araç (curl/wget) gerekmez.
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+volumes:
+  # Named volume: container silinip yeniden oluşturulsa bile PostgreSQL verisi kalıcı olur.
+  ludex_postgres_data:
+    name: ludex_postgres_data
