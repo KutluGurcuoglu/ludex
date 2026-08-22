@@ -183,7 +183,9 @@ export interface LanguageCheck {
 /** Projenin seçtiği kategoriyle içerik olarak ne kadar örtüştüğüne dair AI kontrolü. */
 export interface CategoryFitCheck {
   matchedCategoryId: string;
-  matchScore: number; // 0-100
+  /** 0-100. Gerçek AI değerlendirmesi yalnızca boolean "fit" üretir, sayısal
+   * bir skor hesaplamaz — bu alan yalnızca skor gerçekten hesaplanmışsa dolu olur. */
+  matchScore?: number;
   passed: boolean;
   explanation: string;
 }
@@ -234,9 +236,12 @@ export interface AIAnalysisResult {
   specCompliance: ComplianceCheckItem[];
   templateCompliance: ComplianceCheckItem[];
   contentAnalysis: ContentAnalysis;
-  similarityScore: number; // 0-100, genel benzerlik oranı
+  /** 0-100. Kategori içi benzerlik karşılaştırması henüz gerçek AI tarafında
+   * yapılmıyor (bkz. src/services/ai-analysis.service.ts) — hesaplanmadığında boş kalır. */
+  similarityScore?: number;
   similarReports: SimilarReportMatch[];
-  aiWritingRisk: AIWritingRisk;
+  /** AI yazım risk analizi henüz gerçek AI tarafında yapılmıyor — hesaplanmadığında boş kalır. */
+  aiWritingRisk?: AIWritingRisk;
   suggestedScore?: number;
   evidences: Evidence[];
 }

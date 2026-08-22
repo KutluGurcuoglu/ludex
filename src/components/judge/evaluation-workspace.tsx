@@ -996,7 +996,8 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
 
                           <AccordionItem value="similarity" className="rounded-lg border border-border px-3">
                             <AccordionTrigger className="text-base font-medium hover:no-underline">
-                              Aşama 5 – Kategori Uygunluğu ve Benzerlik (%{analysis.similarityScore})
+                              Aşama 5 – Kategori Uygunluğu ve Benzerlik
+                              {analysis.similarityScore != null ? ` (%${analysis.similarityScore})` : ""}
                             </AccordionTrigger>
                             <AccordionContent className="space-y-3">
                               <ComplianceRow
@@ -1004,7 +1005,10 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
                                   id: "category-fit-check",
                                   label: "Kategori Uygunluğu",
                                   passed: analysis.categoryFitCheck.passed,
-                                  detail: `${analysis.categoryFitCheck.explanation} (uyum skoru: %${analysis.categoryFitCheck.matchScore})`,
+                                  detail:
+                                    analysis.categoryFitCheck.matchScore != null
+                                      ? `${analysis.categoryFitCheck.explanation} (uyum skoru: %${analysis.categoryFitCheck.matchScore})`
+                                      : analysis.categoryFitCheck.explanation,
                                   evidenceIds: [],
                                 }}
                                 analysis={analysis}
@@ -1037,31 +1041,33 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
                             </AccordionContent>
                           </AccordionItem>
 
-                          <AccordionItem value="writing-risk" className="rounded-lg border border-border px-3">
-                            <AccordionTrigger className="text-base font-medium hover:no-underline">
-                              Aşama 6 – AI Yazım Riski ({SEVERITY_LABEL[analysis.aiWritingRisk.verdict]})
-                            </AccordionTrigger>
-                            <AccordionContent className="space-y-2">
-                              <Badge variant="outline" className={SEVERITY_CLASS[analysis.aiWritingRisk.verdict]}>
-                                AI kullanımına işaret eden sinyaller: {SEVERITY_LABEL[analysis.aiWritingRisk.verdict]}
-                              </Badge>
-                              <p className="text-base text-muted-foreground">
-                                {analysis.aiWritingRisk.explanation}
-                              </p>
-                              {analysis.aiWritingRisk.flaggedSections.length > 0 && (
-                                <ul className="list-inside list-disc space-y-0.5 text-base text-muted-foreground">
-                                  {analysis.aiWritingRisk.flaggedSections.map((f) => (
-                                    <li key={`${f.page}-${f.note}`}>
-                                      Sayfa {f.page} – {f.note}
-                                    </li>
-                                  ))}
-                                </ul>
-                              )}
-                              <p className="text-base italic text-muted-foreground">
-                                Bu kesin bir AI tespiti değildir; yalnızca ek inceleme için bir işarettir.
-                              </p>
-                            </AccordionContent>
-                          </AccordionItem>
+                          {analysis.aiWritingRisk && (
+                            <AccordionItem value="writing-risk" className="rounded-lg border border-border px-3">
+                              <AccordionTrigger className="text-base font-medium hover:no-underline">
+                                Aşama 6 – AI Yazım Riski ({SEVERITY_LABEL[analysis.aiWritingRisk.verdict]})
+                              </AccordionTrigger>
+                              <AccordionContent className="space-y-2">
+                                <Badge variant="outline" className={SEVERITY_CLASS[analysis.aiWritingRisk.verdict]}>
+                                  AI kullanımına işaret eden sinyaller: {SEVERITY_LABEL[analysis.aiWritingRisk.verdict]}
+                                </Badge>
+                                <p className="text-base text-muted-foreground">
+                                  {analysis.aiWritingRisk.explanation}
+                                </p>
+                                {analysis.aiWritingRisk.flaggedSections.length > 0 && (
+                                  <ul className="list-inside list-disc space-y-0.5 text-base text-muted-foreground">
+                                    {analysis.aiWritingRisk.flaggedSections.map((f) => (
+                                      <li key={`${f.page}-${f.note}`}>
+                                        Sayfa {f.page} – {f.note}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                )}
+                                <p className="text-base italic text-muted-foreground">
+                                  Bu kesin bir AI tespiti değildir; yalnızca ek inceleme için bir işarettir.
+                                </p>
+                              </AccordionContent>
+                            </AccordionItem>
+                          )}
                         </Accordion>
 
                         {focusedEvidenceId && (
