@@ -58,6 +58,12 @@ const ROLE_LABELS: Record<UserRole, string> = {
   contestant: "Yarışmacı",
 };
 
+const DASHBOARD_PATH: Record<UserRole, string> = {
+  admin: "/admin",
+  judge: "/judge",
+  contestant: "/contestant",
+};
+
 const GENDER_OPTIONS = ["Kadın", "Erkek", "Belirtmek istemiyorum"];
 const REFERRAL_OPTIONS = [
   "TEKNOFEST Kulübü",
@@ -244,11 +250,20 @@ function ProfileView() {
       <AppHeader />
       <div className="min-h-[calc(100vh-4rem)]">
         <main className="w-full px-6 py-12 md:px-12">
-          <div className="mb-8">
-            <h1 className="text-2xl font-semibold tracking-tight">Hesabım</h1>
-            <p className="mt-1 text-base leading-relaxed text-muted-foreground">
-              Bilgilerini güncelle veya hesabını yönet.
-            </p>
+          <div className="mb-8 flex items-start justify-between gap-3">
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight">Hesabım</h1>
+              <p className="mt-1 text-base leading-relaxed text-muted-foreground">
+                Bilgilerini güncelle veya hesabını yönet.
+              </p>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => router.push(DASHBOARD_PATH[user.role])}
+            >
+              ← Panele Dön
+            </Button>
           </div>
 
           <div className="grid gap-6 lg:grid-cols-3">
