@@ -3,6 +3,10 @@ import Credentials from "next-auth/providers/credentials";
 import { getUserRepository } from "@/lib/repositories/user-repository";
 import { verifyPassword } from "@/lib/auth/password";
 import { loginCredentialsSchema } from "@/lib/auth/schema";
+import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
+
+const LOGIN_RATE_LIMIT = 10;
+const LOGIN_RATE_WINDOW_MS = 5 * 60 * 1000; // 5 dakika
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
   // TODO(db): "jwt" oturum stratejisi kullanılıyor çünkü henüz kalıcı bir
@@ -25,7 +29,14 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         email: { type: "email", label: "E-posta" },
         password: { type: "password", label: "Şifre" },
       },
-      authorize: async (rawCredentials) => {
+      authorize: async (rawCredentials, request) => {
+        const ip = getClientIp(request);
+        if (!checkRateLimit(`login:${ip}`, LOGIN_RATE_LIMIT, LOGIN_RATE_WINDOW_MS)) {
+          // Normal "hatalı kimlik bilgisi" ile aynı şekilde ele alınır — auth.service.ts
+          // zaten her authorize() reddini aynı genel mesaja eşliyor (bkz. login()).
+          return null;
+        }
+
         const parsed = loginCredentialsSchema.safeParse(rawCredentials);
         if (!parsed.success) return null;
 

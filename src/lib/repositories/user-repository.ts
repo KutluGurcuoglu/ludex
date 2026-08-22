@@ -1,4 +1,5 @@
 import bcrypt from "bcryptjs";
+import { randomUUID } from "node:crypto";
 import type { JudgeApprovalStatus, JudgeWorkStatus, UserRole } from "@/types";
 
 const PASSWORD_SALT_ROUNDS = 12;
@@ -130,7 +131,7 @@ class InMemoryUserRepository implements UserRepository {
 
   async create(input: CreateUserInput): Promise<UserRecord> {
     const user: UserRecord = {
-      id: `${input.role}-${Date.now()}`,
+      id: `${input.role}-${randomUUID()}`,
       name: input.name,
       email: input.email,
       phone: input.phone,

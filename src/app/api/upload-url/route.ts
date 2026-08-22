@@ -5,9 +5,12 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { auth } from "@/auth";
 import { getR2Client, getR2BucketName } from "@/lib/storage/r2-client";
+import { checkRateLimit } from "@/lib/rate-limit";
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
 const PRESIGN_EXPIRY_SECONDS = 60;
+const UPLOAD_URL_RATE_LIMIT = 20;
+const UPLOAD_URL_RATE_WINDOW_MS = 60 * 60 * 1000; // 1 saat
 
 const requestSchema = z.object({
   filename: z
@@ -32,6 +35,15 @@ export async function POST(req: Request) {
   const session = await auth();
   if (!session?.user || session.user.role !== "contestant") {
     return NextResponse.json({ error: "Yetkisiz erişim." }, { status: 401 });
+  }
+
+  if (
+    !checkRateLimit(`upload-url:${session.user.id}`, UPLOAD_URL_RATE_LIMIT, UPLOAD_URL_RATE_WINDOW_MS)
+  ) {
+    return NextResponse.json(
+      { error: "Çok fazla yükleme linki talebi. Lütfen daha sonra tekrar deneyin." },
+      { status: 429 }
+    );
   }
 
   let body: unknown;

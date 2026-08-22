@@ -2,8 +2,19 @@ import { NextResponse } from "next/server";
 import { getUserRepository } from "@/lib/repositories/user-repository";
 import { hashPassword } from "@/lib/auth/password";
 import { registerInputSchema } from "@/lib/auth/schema";
+import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
+
+const REGISTER_RATE_LIMIT = 5;
+const REGISTER_RATE_WINDOW_MS = 60 * 60 * 1000; // 1 saat
 
 export async function POST(req: Request) {
+  if (!checkRateLimit(`register:${getClientIp(req)}`, REGISTER_RATE_LIMIT, REGISTER_RATE_WINDOW_MS)) {
+    return NextResponse.json(
+      { error: "Çok fazla kayıt denemesi yaptınız. Lütfen daha sonra tekrar deneyin." },
+      { status: 429 }
+    );
+  }
+
   let body: unknown;
   try {
     body = await req.json();
