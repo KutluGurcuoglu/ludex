@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -56,6 +56,27 @@ export default function LoginPage() {
       router.replace(DASHBOARD_PATH[currentUser.role]);
     }
   }, [ready, currentUser, router]);
+
+  const [authTab, setAuthTab] = useState<"login" | "register">("login");
+
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("tab") === "register") {
+      setAuthTab("register");
+    }
+  }, []);
+  const authTabsMeasureRef = useRef<HTMLDivElement>(null);
+  const [authTabsHeight, setAuthTabsHeight] = useState<number>();
+
+  useEffect(() => {
+    const el = authTabsMeasureRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver((entries) => {
+      const h = entries[0]?.contentRect.height;
+      if (h) setAuthTabsHeight(h);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
@@ -235,12 +256,17 @@ export default function LoginPage() {
               </div>
             ) : (
               <>
-                <Tabs defaultValue="login">
+                <Tabs value={authTab} onValueChange={(v) => setAuthTab(v as "login" | "register")}>
               <TabsList className="grid w-full grid-cols-2">
                 <TabsTrigger value="login">Giriş Yap</TabsTrigger>
                 <TabsTrigger value="register">Kayıt Ol</TabsTrigger>
               </TabsList>
 
+              <div
+                className="overflow-hidden transition-[height] duration-200 ease-out"
+                style={{ height: authTabsHeight }}
+              >
+              <div ref={authTabsMeasureRef}>
               <TabsContent value="login" className="mt-6">
                 <form onSubmit={handleLogin} className="space-y-4">
                   <div className="space-y-2">
@@ -371,8 +397,22 @@ export default function LoginPage() {
                   <Button type="submit" className="w-full transition-transform active:scale-[0.98]">
                     Kayıt Ol
                   </Button>
+
+                  <p className="text-center text-xs text-muted-foreground">
+                    Kayıt olarak{" "}
+                    <Link href="/terms" className="underline underline-offset-2 hover:text-foreground">
+                      Kullanım Şartları
+                    </Link>
+                    &apos;nı ve{" "}
+                    <Link href="/kvkk" className="underline underline-offset-2 hover:text-foreground">
+                      KVKK Aydınlatma Metni
+                    </Link>
+                    &apos;ni kabul etmiş olursunuz.
+                  </p>
                 </form>
               </TabsContent>
+              </div>
+              </div>
             </Tabs>
 
             <div className="mt-6">

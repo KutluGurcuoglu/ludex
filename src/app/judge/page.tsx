@@ -53,6 +53,7 @@ import {
 } from "@/components/ui/dialog";
 import { useAppStore, useCurrentUser } from "@/store/useAppStore";
 import * as usersService from "@/services/users.service";
+import { logout } from "@/services/auth.service";
 import { refreshReports, refreshCategories, refreshEvaluations } from "@/services/sync";
 import type { Category, JudgeEvaluation, JudgeWorkStatus, Report, User } from "@/types";
 
@@ -357,7 +358,10 @@ function JudgeApplicationForm({ user, categories }: { user: User; categories: Ca
         variant="ghost"
         size="sm"
         className="mb-4 -ml-2 gap-1.5"
-        onClick={() => router.back()}
+        onClick={async () => {
+          await logout();
+          router.replace("/login");
+        }}
       >
         <ArrowLeft className="size-4" />
         Geri Dön
