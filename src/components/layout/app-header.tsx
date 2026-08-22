@@ -19,6 +19,13 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useAppStore, useCurrentUser } from "@/store/useAppStore";
+import type { UserRole } from "@/types";
+
+const DASHBOARD_PATH: Record<UserRole, string> = {
+  admin: "/admin",
+  judge: "/judge",
+  contestant: "/contestant",
+};
 
 export function AppHeader({}: { subtitle?: string } = {}) {
   const user = useCurrentUser();
@@ -31,12 +38,15 @@ export function AppHeader({}: { subtitle?: string } = {}) {
   return (
     <header className="glass-toolbar sticky top-0 z-40">
       <div className="flex h-16 w-full items-center justify-between px-6 md:px-12">
-        <div className="flex flex-col items-start justify-center leading-tight">
+        <Link
+          href={DASHBOARD_PATH[user.role]}
+          className="flex flex-col items-start justify-center leading-tight transition-opacity hover:opacity-80"
+        >
           <span className="text-brand-gradient text-lg font-bold tracking-tight">
             Ludex
           </span>
           <span className="text-sm text-muted-foreground">{user.name}</span>
-        </div>
+        </Link>
 
         <div className="ml-auto flex items-center gap-3">
           <NotificationBell />
