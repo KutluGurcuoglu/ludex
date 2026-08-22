@@ -959,21 +959,23 @@ export const useAppStore = create<AppState>()(
         if (user) set({ currentUserId: user.id });
       },
 
-      // Gerçek oturumdan çekilmiş veri (reports/evaluations/users/categories/
-      // scoreCriteria) yalnızca currentUserId temizlenirse localStorage'da
-      // kalıcı kalır — paylaşılan bir bilgisayarda bir sonraki kullanıcı,
-      // taze bir fetch üzerine yazana kadar önceki kullanıcının gerçek
-      // verisini görebilir. Bu yüzden çıkışta bu alanlar seed/demo verisine
-      // sıfırlanır (boş değil — demoLogin'in çalışabilmesi için seed
-      // kullanıcılarının var olması gerekir).
+      // Gerçek oturumdan çekilmiş rapor/değerlendirme verisi yalnızca
+      // currentUserId temizlenirse localStorage'da kalıcı kalır — paylaşılan
+      // bir bilgisayarda bir sonraki kullanıcı, taze bir fetch üzerine
+      // yazana kadar önceki kullanıcının gerçek verisini görebilir. Bu
+      // yüzden çıkışta bu alanlar boşa sıfırlanır (seed/demo verisine
+      // DEĞİL — signOut() tamamlanana kadar mevcut sayfa hâlâ mount'lu
+      // kalabildiğinden, seed'e sıfırlamak kısa bir an için gerçek
+      // kullanıcıya sahte veri gösterilmesine yol açıyordu).
+      // categories/scoreCriteria (yarışmanın genel yapılandırması, kişiye
+      // özel değil) ve users/credentials (hâlâ yalnızca test kapsamındaki
+      // mock login/register akışının iç tutarlılığı için gerekli) kasıtlı
+      // olarak dokunulmadan bırakılır.
       logout: () =>
         set({
           currentUserId: null,
-          reports: SEED_REPORTS,
-          evaluations: SEED_EVALUATIONS,
-          users: SEED_USERS,
-          categories: CATEGORIES,
-          scoreCriteria: SCORE_CRITERIA,
+          reports: [],
+          evaluations: [],
         }),
 
       setReports: (reports) => set({ reports }),

@@ -23,7 +23,6 @@ import {
   register,
   verifyEmail,
   resendEmailVerification,
-  demoLogin,
 } from "@/services/auth.service";
 import type { UserRole } from "@/types";
 
@@ -32,6 +31,18 @@ const DASHBOARD_PATH: Record<UserRole, string> = {
   judge: "/judge",
   contestant: "/contestant",
 };
+
+/**
+ * Demo butonları gerçek seed hesaplarıyla gerçek NextAuth girişini tetikler
+ * (bkz. src/lib/repositories/user-repository.ts) — mock/sahte bir oturum
+ * DEĞİLDİR, bu yüzden giriş sonrası tüm gerçek API çağrıları normal şekilde çalışır.
+ */
+const DEMO_CREDENTIALS: Record<UserRole, string> = {
+  admin: "admin@ludex.com",
+  judge: "elif.yilmaz@ludex.com",
+  contestant: "mehmet.ozturk@example.com",
+};
+const DEMO_PASSWORD = "demo1234";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -62,6 +73,7 @@ export default function LoginPage() {
   const [verifyError, setVerifyError] = useState<string | null>(null);
   const [verifySubmitting, setVerifySubmitting] = useState(false);
   const [resending, setResending] = useState(false);
+  const [demoLoggingIn, setDemoLoggingIn] = useState<UserRole | null>(null);
 
   async function handleLogin(e: FormEvent) {
     e.preventDefault();
@@ -117,6 +129,15 @@ export default function LoginPage() {
       toast.info(`Demo doğrulama kodu: ${result.code}`);
     } else if (!result.success) {
       toast.error(result.error ?? "Kod tekrar gönderilemedi.");
+    }
+  }
+
+  async function handleDemoLogin(demoRole: UserRole) {
+    setDemoLoggingIn(demoRole);
+    const result = await login(DEMO_CREDENTIALS[demoRole], DEMO_PASSWORD);
+    setDemoLoggingIn(null);
+    if (!result.success) {
+      toast.error(result.error ?? "Demo giriş başarısız.");
     }
   }
 
@@ -367,25 +388,40 @@ export default function LoginPage() {
                 <Button
                   variant="outline"
                   className="h-auto flex-col gap-1.5 py-3 transition-transform active:scale-[0.97]"
-                  onClick={() => demoLogin("admin")}
+                  disabled={demoLoggingIn !== null}
+                  onClick={() => handleDemoLogin("admin")}
                 >
-                  <ShieldCheck className="size-4" />
+                  {demoLoggingIn === "admin" ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <ShieldCheck className="size-4" />
+                  )}
                   <span className="text-xs">Admin</span>
                 </Button>
                 <Button
                   variant="outline"
                   className="h-auto flex-col gap-1.5 py-3 transition-transform active:scale-[0.97]"
-                  onClick={() => demoLogin("judge")}
+                  disabled={demoLoggingIn !== null}
+                  onClick={() => handleDemoLogin("judge")}
                 >
-                  <Gavel className="size-4" />
+                  {demoLoggingIn === "judge" ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <Gavel className="size-4" />
+                  )}
                   <span className="text-xs">Hakem</span>
                 </Button>
                 <Button
                   variant="outline"
                   className="h-auto flex-col gap-1.5 py-3 transition-transform active:scale-[0.97]"
-                  onClick={() => demoLogin("contestant")}
+                  disabled={demoLoggingIn !== null}
+                  onClick={() => handleDemoLogin("contestant")}
                 >
-                  <Sparkles className="size-4" />
+                  {demoLoggingIn === "contestant" ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <Sparkles className="size-4" />
+                  )}
                   <span className="text-xs">Yarışmacı</span>
                 </Button>
               </div>

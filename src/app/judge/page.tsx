@@ -52,9 +52,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useAppStore, useCurrentUser } from "@/store/useAppStore";
-import * as reportsService from "@/services/reports.service";
-import * as categoriesService from "@/services/categories.service";
 import * as usersService from "@/services/users.service";
+import { refreshReports, refreshCategories, refreshEvaluations } from "@/services/sync";
 import type { Category, JudgeEvaluation, JudgeWorkStatus, Report, User } from "@/types";
 
 const WORK_STATUS_LABEL: Record<JudgeWorkStatus, string> = {
@@ -723,9 +722,11 @@ function JudgeDashboard() {
 
   useEffect(() => {
     let active = true;
-    Promise.all([reportsService.getReports(), categoriesService.getCategories()]).then(() => {
-      if (active) setIsLoading(false);
-    });
+    Promise.all([refreshReports(), refreshCategories(), refreshEvaluations()])
+      .catch((error) => console.error("Hakem paneli verileri alınamadı:", error))
+      .finally(() => {
+        if (active) setIsLoading(false);
+      });
     return () => {
       active = false;
     };

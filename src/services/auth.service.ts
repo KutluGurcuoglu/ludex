@@ -68,21 +68,13 @@ export function resendEmailVerification(): Promise<
   return Promise.resolve(useAppStore.getState().resendEmailVerification());
 }
 
-/**
- * Demo/kısayol girişi — kimlik bilgisi doğrulaması yapmaz, yalnızca mock store
- * üzerinde çalışır. Gerçek backend'de güvenli bir karşılığı olmadığı için
- * bilerek gerçek oturuma bağlanmadı (bkz. ekip kararı).
- */
-export function demoLogin(role: UserRole): Promise<void> {
-  useAppStore.getState().demoLogin(role);
-  return Promise.resolve();
-}
-
 export async function logout(): Promise<void> {
-  // Hem gerçek NextAuth oturumunu hem de (varsa) demoLogin'den kalan mock
-  // durumunu temizler — hangi yoldan giriş yapılmış olursa olsun çıkış tam olsun diye.
-  useAppStore.getState().logout();
+  // Önce gerçek NextAuth oturumu kapatılır: signOut() tamamlanana kadar
+  // korumalı sayfa hâlâ mount'lu ve yetkili görünebilir (RouteGuard gerçek
+  // session'ın düşmesini bekliyor) — store'u önce temizlemek, o kısa an
+  // içinde geçerli kullanıcıya sıfırlanmış/boş veri gösterilmesine yol açardı.
   await signOut({ redirect: false });
+  useAppStore.getState().logout();
 }
 
 export function requestPasswordReset(
