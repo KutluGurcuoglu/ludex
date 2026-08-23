@@ -160,7 +160,7 @@ export default function LandingPage() {
                 initial={{ opacity: 0, y: 12 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={SPRING}
-                className="mb-6 inline-flex items-center gap-2 rounded-full border border-border/60 bg-card/60 px-4 py-1.5 text-sm text-muted-foreground backdrop-blur-sm"
+                className="mb-6 inline-flex items-center gap-2 rounded-full border border-border/60 bg-card/60 px-5 py-2.5 text-xs font-light tracking-wider text-muted-foreground backdrop-blur-md dark:border-white/10 dark:bg-white/5 dark:text-zinc-300"
               >
                 <span className="size-1.5 rounded-full bg-primary" />
                 Yarışma raporları için karar desteği
@@ -170,7 +170,7 @@ export default function LandingPage() {
                 initial={{ opacity: 0, y: 16 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ ...SPRING, delay: 0.05 }}
-                className="text-4xl font-extrabold tracking-[-0.03em] sm:text-5xl md:text-6xl"
+                className="text-4xl leading-tight font-normal tracking-tight sm:text-5xl md:text-6xl"
               >
                 Rapor başına saatler harcamak yerine,
                 <br />
@@ -202,7 +202,7 @@ export default function LandingPage() {
                     <ArrowRight className="size-4" />
                   </Link>
                 </Button>
-                <Button asChild variant="outline" size="lg">
+                <Button asChild variant="outline" size="lg" className="rounded-full">
                   <Link href="/login">Demo ile Gir</Link>
                 </Button>
               </motion.div>
@@ -448,7 +448,7 @@ export default function LandingPage() {
       </section>
 
       {/* HUMAN IN THE LOOP */}
-      <section className="py-28">
+      <section id="karar-yetkisi" className="py-28">
         <div className="mx-auto max-w-6xl px-6 md:px-12">
           <Reveal className="mx-auto max-w-2xl text-center">
             <p className="font-mono text-xs tracking-widest text-muted-foreground uppercase">
