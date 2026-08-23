@@ -325,6 +325,7 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
     finding: GateFinding;
     decision: "flagged" | "dismissed";
   } | null>(null);
+  const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
 
   const [messages, setMessages] = useState<CopilotChatMessage[]>([
     {
@@ -526,7 +527,25 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
     setScores((prev) => ({ ...prev, [criterionId]: value }));
   }
 
-  async function persistEvaluation(status: "draft" | "submitted") {
+  const hasUnsavedProgress =
+    existingEvaluation?.status !== "submitted" &&
+    (analysisState !== "idle" ||
+      overallComment.trim().length > 0 ||
+      Object.values(scores).some((v) => v > 0) ||
+      Object.keys(findingDecisions).length > 0);
+
+  function handleBackToPanel() {
+    if (hasUnsavedProgress) {
+      setLeaveConfirmOpen(true);
+    } else {
+      router.push("/judge");
+    }
+  }
+
+  async function persistEvaluation(
+    status: "draft" | "submitted",
+    options?: { navigateAfter?: boolean },
+  ) {
     if (!user || !report) return;
     setSaving(true);
 
@@ -549,9 +568,39 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
     setSaving(false);
 
     toast.success(status === "draft" ? "Taslak kaydedildi." : "Değerlendirme tamamlandı.");
-    if (status === "submitted") {
+    if (status === "submitted" || options?.navigateAfter) {
       router.push("/judge");
     }
+  }
+
+  async function handleSaveAndLeave() {
+    setLeaveConfirmOpen(false);
+    await persistEvaluation("draft", { navigateAfter: true });
+  }
+
+  async function handleStartOverAndLeave() {
+    if (existingEvaluation && user && report) {
+      setSaving(true);
+      await evaluationsService.saveEvaluation({
+        id: existingEvaluation.id,
+        reportId: report.id,
+        judgeId: user.id,
+        criteriaScores: scoreCriteria.map((c) => ({ criterionId: c.id, score: 0 })),
+        totalScore: 0,
+        overallComment: "",
+        status: "draft",
+        disqualificationRecommendation: null,
+        updatedAt: new Date().toISOString(),
+      });
+      setSaving(false);
+    }
+    setScores({});
+    setOverallComment("");
+    setDisqualification(null);
+    setFindingDecisions({});
+    toast.info("Değerlendirme sıfırlandı.");
+    setLeaveConfirmOpen(false);
+    router.push("/judge");
   }
 
   async function handleSendChat(e: FormEvent) {
@@ -613,7 +662,7 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
                 {report.contestantName} &middot; {category?.name ?? "Kategori"}
               </p>
             </div>
-            <Button variant="ghost" size="sm" onClick={() => router.push("/judge")}>
+            <Button variant="ghost" size="sm" onClick={handleBackToPanel}>
               ← Panele Dön
             </Button>
           </div>
@@ -825,6 +874,21 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
                   </div>
                 )}
 
+                {analysis &&
+                  gateFindings.length === 0 &&
+                  analysisState !== "idle" &&
+                  analysisState !== "checking" && (
+                    <Alert className="border-emerald-300 bg-emerald-50 dark:border-emerald-900 dark:bg-emerald-950">
+                      <CheckCircle2 className="size-4 text-emerald-600 dark:text-emerald-400" />
+                      <AlertTitle className="text-emerald-800 dark:text-emerald-300">
+                        Şartnameye Uygun
+                      </AlertTitle>
+                      <AlertDescription className="text-emerald-700 dark:text-emerald-400">
+                        Dil ve şartname denetiminde herhangi bir sorun tespit edilmedi.
+                      </AlertDescription>
+                    </Alert>
+                  )}
+
                 {analysisState === "done" && analysis && summaryCounts && (
                   <div className="animate-in fade-in-0 slide-in-from-bottom-2 space-y-6 duration-500">
                     <Card className="border-primary/30 bg-primary/5">
@@ -846,6 +910,48 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
                         <Badge variant="secondary" className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-400">
                           {summaryCounts.strengths} Güçlü Alan
                         </Badge>
+                      </CardContent>
+                    </Card>
+
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="text-base">İçerik Analizi</CardTitle>
+                        <CardDescription>{analysis.contentAnalysis.summary}</CardDescription>
+                      </CardHeader>
+                      <CardContent className="grid gap-5 sm:grid-cols-3">
+                        <div>
+                          <p className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-emerald-700 dark:text-emerald-400">
+                            <CheckCircle2 className="size-4" />
+                            Güçlü Yönler
+                          </p>
+                          <ul className="list-inside list-disc space-y-1 text-sm text-muted-foreground">
+                            {analysis.contentAnalysis.strengths.map((s) => (
+                              <li key={s}>{s}</li>
+                            ))}
+                          </ul>
+                        </div>
+                        <div>
+                          <p className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-red-700 dark:text-red-400">
+                            <XCircle className="size-4" />
+                            Eksik / Zayıf Yönler
+                          </p>
+                          <ul className="list-inside list-disc space-y-1 text-sm text-muted-foreground">
+                            {analysis.contentAnalysis.weaknesses.map((s) => (
+                              <li key={s}>{s}</li>
+                            ))}
+                          </ul>
+                        </div>
+                        <div>
+                          <p className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-primary">
+                            <Sparkles className="size-4" />
+                            Geliştirme Önerileri
+                          </p>
+                          <ul className="list-inside list-disc space-y-1 text-sm text-muted-foreground">
+                            {analysis.contentAnalysis.improvementSuggestions.map((s) => (
+                              <li key={s}>{s}</li>
+                            ))}
+                          </ul>
+                        </div>
                       </CardContent>
                     </Card>
 
@@ -927,50 +1033,9 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
                             </AccordionContent>
                           </AccordionItem>
 
-                          <AccordionItem value="content" className="rounded-lg border border-border px-3">
-                            <AccordionTrigger className="text-base font-medium hover:no-underline">
-                              Aşama 4 – Proje ve İçerik Analizi
-                            </AccordionTrigger>
-                            <AccordionContent className="space-y-3">
-                              <p className="text-base text-muted-foreground">
-                                {analysis.contentAnalysis.summary}
-                              </p>
-                              <div>
-                                <p className="mb-1 text-base font-semibold text-emerald-700 dark:text-emerald-400">
-                                  Güçlü Yönler
-                                </p>
-                                <ul className="list-inside list-disc space-y-0.5 text-base text-muted-foreground">
-                                  {analysis.contentAnalysis.strengths.map((s) => (
-                                    <li key={s}>{s}</li>
-                                  ))}
-                                </ul>
-                              </div>
-                              <div>
-                                <p className="mb-1 text-base font-semibold text-red-700 dark:text-red-400">
-                                  Zayıf Yönler
-                                </p>
-                                <ul className="list-inside list-disc space-y-0.5 text-base text-muted-foreground">
-                                  {analysis.contentAnalysis.weaknesses.map((s) => (
-                                    <li key={s}>{s}</li>
-                                  ))}
-                                </ul>
-                              </div>
-                              <div>
-                                <p className="mb-1 text-base font-semibold text-primary">
-                                  Geliştirme Önerileri
-                                </p>
-                                <ul className="list-inside list-disc space-y-0.5 text-base text-muted-foreground">
-                                  {analysis.contentAnalysis.improvementSuggestions.map((s) => (
-                                    <li key={s}>{s}</li>
-                                  ))}
-                                </ul>
-                              </div>
-                            </AccordionContent>
-                          </AccordionItem>
-
                           <AccordionItem value="similarity" className="rounded-lg border border-border px-3">
                             <AccordionTrigger className="text-base font-medium hover:no-underline">
-                              Aşama 5 – Kategori Uygunluğu ve Benzerlik (%{analysis.similarityScore})
+                              Aşama 4 – Kategori Uygunluğu ve Benzerlik (%{analysis.similarityScore})
                             </AccordionTrigger>
                             <AccordionContent className="space-y-3">
                               <ComplianceRow
@@ -1013,7 +1078,7 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
 
                           <AccordionItem value="writing-risk" className="rounded-lg border border-border px-3">
                             <AccordionTrigger className="text-base font-medium hover:no-underline">
-                              Aşama 6 – AI Yazım Riski ({SEVERITY_LABEL[analysis.aiWritingRisk.verdict]})
+                              Aşama 5 – AI Yazım Riski ({SEVERITY_LABEL[analysis.aiWritingRisk.verdict]})
                             </AccordionTrigger>
                             <AccordionContent className="space-y-2">
                               <Badge variant="outline" className={SEVERITY_CLASS[analysis.aiWritingRisk.verdict]}>
@@ -1293,6 +1358,39 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
               onClick={confirmPendingDecision}
             >
               Onayla
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={leaveConfirmOpen} onOpenChange={setLeaveConfirmOpen}>
+        <AlertDialogContent className="p-6">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Panele dönmek istediğine emin misin?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Bu değerlendirmeyi henüz tamamlamadın. İlerlemeni taslak olarak kaydedip çıkabilir
+              ya da değerlendirmeyi sıfırlayıp baştan başlayabilirsin.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="mx-0 mb-0 flex-col flex-wrap gap-2 rounded-none border-t-0 bg-transparent p-0 sm:flex-col sm:justify-start">
+            <AlertDialogAction disabled={saving} onClick={handleSaveAndLeave} className="w-full">
+              Taslak Olarak Kaydet ve Çık
+            </AlertDialogAction>
+            <AlertDialogCancel
+              disabled={saving}
+              onClick={() => setLeaveConfirmOpen(false)}
+              className="w-full"
+            >
+              Değerlendirmeye Devam Et
+            </AlertDialogCancel>
+            <AlertDialogAction
+              variant="link"
+              size="sm"
+              disabled={saving}
+              onClick={handleStartOverAndLeave}
+              className="mx-auto mt-1 h-auto text-destructive/80 no-underline hover:text-destructive hover:underline"
+            >
+              İlerlemeyi Sıfırla / Baştan Başla
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
