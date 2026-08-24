@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "eslint .",
     "infra:up": "docker compose up -d",
     "infra:down": "docker compose down",
     "infra:status": "docker compose ps"
@@ -38,10 +38,13 @@
     "tailwind-merge": "^3.0.1"
   },
   "devDependencies": {
+    "@eslint/eslintrc": "^3.3.6",
     "@prisma/config": "^6.4.1",
     "@types/node": "^20.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "eslint": "^9.39.5",
+    "eslint-config-next": "^15.5.23",
     "prisma": "^6.4.1",
     "tsx": "^4.19.0",
     "typescript": "^5.0.0"
