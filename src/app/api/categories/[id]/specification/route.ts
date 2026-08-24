@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireRole } from "@/lib/auth/require-role";
 import { getCategoryRepository } from "@/lib/repositories/category-repository";
 import { getStorageProvider } from "@/lib/storage";
+import { getTextExtractor } from "@/lib/text-extraction";
 
 const bodySchema = z.object({
   fileName: z.string().trim().min(1).max(255),
@@ -44,7 +45,31 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
     );
   }
 
-  const category = await getCategoryRepository().setSpecification(id, {
+  // Şartname metni AI evaluate prompt'una gerçek referans olarak gidiyor
+  // (bkz. src/lib/ai-evaluation) — bu yüzden yükleme anında gerçek metni
+  // çıkarıp kalıcı hale getiriyoruz. Metin çıkarılamazsa (ör. taranmış
+  // görüntü tabanlı PDF) yükleme reddedilir; sahte bir şartname asla
+  // kaydedilmez.
+  let specificationText: string;
+  try {
+    const { markdown } = await getTextExtractor().extractFromStorageObject(parsed.data.key);
+    specificationText = markdown.trim();
+    if (!specificationText) {
+      throw new Error("empty");
+    }
+  } catch (error) {
+    console.error(`Şartname metin çıkarma hatası (kategori ${id}):`, error);
+    return NextResponse.json(
+      {
+        error:
+          "Şartname PDF'ten metin çıkarılamadı (taranmış görüntü tabanlı bir PDF olabilir). Lütfen metin içeren bir PDF yükleyin.",
+      },
+      { status: 400 }
+    );
+  }
+
+  const categoryRepository = getCategoryRepository();
+  const category = await categoryRepository.setSpecification(id, {
     fileName: parsed.data.fileName,
     fileUrl: parsed.data.key,
     fileSizeBytes: head.contentLength,
@@ -54,5 +79,7 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
     return NextResponse.json({ error: "Kategori bulunamadı." }, { status: 404 });
   }
 
-  return NextResponse.json({ success: true, category });
+  const updated = await categoryRepository.setSpecificationText(id, specificationText);
+
+  return NextResponse.json({ success: true, category: updated ?? category });
 }

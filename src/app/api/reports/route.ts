@@ -6,8 +6,10 @@ import { getReportRepository, type ReportRecord } from "@/lib/repositories/repor
 import { getCategoryRepository, isSubmissionWindowOpen } from "@/lib/repositories/category-repository";
 import { getUserRepository } from "@/lib/repositories/user-repository";
 import { getEvaluationRepository, type EvaluationRecord } from "@/lib/repositories/evaluation-repository";
+import { getScoreCriteriaRepository, getEffectiveCriteria } from "@/lib/repositories/score-criteria-repository";
 import { getTextExtractor } from "@/lib/text-extraction";
 import { deriveAiFeedback } from "@/lib/ai-feedback";
+import { computeContextHash } from "@/lib/ai-evaluation/context-hash";
 import type { AIContestantFeedback } from "@/types";
 
 // LlamaParse gerçek modda çalıştığında iş birkaç dakika sürebilir; Vercel
@@ -38,7 +40,8 @@ const createReportSchema = z.object({
 async function toApiReport(
   report: ReportRecord,
   includeAiEvaluation: boolean,
-  aiFeedback: AIContestantFeedback | null = null
+  aiFeedback: AIContestantFeedback | null = null,
+  currentContextHash: string | null = null
 ) {
   const [contestant, pdfUrl] = await Promise.all([
     getUserRepository().findById(report.contestantId),
@@ -61,7 +64,18 @@ async function toApiReport(
     aiFeedback,
   };
 
-  return includeAiEvaluation ? { ...base, aiEvaluation: report.aiEvaluation } : base;
+  if (!includeAiEvaluation) return base;
+
+  // Admin şartnameyi/şablonu/kriterleri değiştirdiyse, daha önce üretilmiş
+  // bir AIAnalysis artık güncel konfigürasyonu yansıtmıyordur — contextHash
+  // eşleşmiyorsa (veya bu özellikten önce üretildiği için hiç yoksa) analiz
+  // stale sayılır ve hakem ekranı bunu sessizce göstermek yerine açıkça
+  // uyarır (bkz. computeContextHash, evaluation-workspace.tsx).
+  const aiAnalysisStale = report.aiEvaluation
+    ? report.aiEvaluation.contextHash !== currentContextHash
+    : false;
+
+  return { ...base, aiEvaluation: report.aiEvaluation, aiAnalysisStale };
 }
 
 export async function POST(req: Request) {
@@ -124,8 +138,8 @@ export async function POST(req: Request) {
 
   try {
     const extractor = getTextExtractor();
-    const { markdown } = await extractor.extractFromStorageObject(r2Key);
-    await reportRepository.setExtractedText(report.id, markdown);
+    const { markdown, pages } = await extractor.extractFromStorageObject(r2Key);
+    await reportRepository.setExtractedText(report.id, markdown, pages);
   } catch (error) {
     // Metin çıkarma başarısız olsa bile rapor kaydı geçerlidir — sonradan
     // yeniden denenebilir. Hakem, extractedText null iken raporu yalnızca
@@ -158,6 +172,27 @@ export async function GET() {
   // Yarışmacıya AI değerlendirmesi asla dönmemeli; admin/hakem görebilir.
   const includeAiEvaluation = role !== "contestant";
 
+  // Her kategorinin GÜNCEL bağlam hash'ini bir kez hesaplayıp raporlar
+  // arasında paylaşıyoruz — computeContextHash tek kaynak, evaluate route'un
+  // bir analiz üretirken kullandığı algoritmanın birebir aynısı.
+  const categoryContextHashes = new Map<string, string>();
+  if (includeAiEvaluation) {
+    const [categories, globalCriteria] = await Promise.all([
+      getCategoryRepository().listAll(),
+      getScoreCriteriaRepository().listAll(),
+    ]);
+    for (const category of categories) {
+      categoryContextHashes.set(
+        category.id,
+        computeContextHash({
+          specificationText: category.specificationText,
+          templateSections: category.templateSections,
+          criteria: getEffectiveCriteria(category, globalCriteria),
+        })
+      );
+    }
+  }
+
   // Yarışmacı yalnızca KENDİ raporunun sonucu yayınlandıysa (visibleToContestant)
   // AI destekli geri bildirimi (strengths/areasForImprovement/recommendations)
   // görebilir — benzerlik/kritik bulgu gibi hakem/admin'e özel ayrıntılar hiçbir
@@ -177,7 +212,12 @@ export async function GET() {
       const aiFeedback = evaluationsByReport
         ? deriveAiFeedback(r, evaluationsByReport.get(r.id) ?? [])
         : null;
-      return toApiReport(r, includeAiEvaluation, aiFeedback);
+      return toApiReport(
+        r,
+        includeAiEvaluation,
+        aiFeedback,
+        categoryContextHashes.get(r.categoryId) ?? null
+      );
     })
   );
   return NextResponse.json({ reports });

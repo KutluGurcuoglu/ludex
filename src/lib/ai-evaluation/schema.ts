@@ -22,6 +22,8 @@ export const reportTemplateSchema = z.object({
 export const evaluationInputSchema = z.object({
   reportContent: z.string().min(1),
   category: z.string().min(1),
+  /** Yarışmanın güncel şartname PDF'inden çıkarılmış gerçek metni. Yüklenmemişse boş bırakılır. */
+  specificationContent: z.string().optional(),
   template: reportTemplateSchema,
   evaluationCriteria: z.array(evaluationCriterionSchema).min(1),
 });
@@ -51,6 +53,9 @@ export const headingContentAnalysisItemSchema = z.object({
   headingPresent: z.boolean(),
   contentMatchesExpectation: z.boolean(),
   notes: z.string().min(1),
+  /** Yalnızca raporda gerçekten var olan bir alıntı için doldurulur — kanıt yoksa boş bırakılır. */
+  pageNumber: z.number().int().positive().optional(),
+  exactExcerpt: z.string().optional(),
 });
 
 export const categoryFitSchema = z.object({
@@ -63,12 +68,39 @@ export const criterionEvaluationSchema = z.object({
   score: z.number().min(0).nullable(),
   reason: z.string().min(1),
   evidence: z.string().min(1).optional(),
+  pageNumber: z.number().int().positive().optional(),
+  exactExcerpt: z.string().optional(),
+  /** LLM tarafından üretilmez; route, ilgili kriterin (getEffectiveCriteria) label'ını burada damgalar. */
+  criterionLabel: z.string().optional(),
+  criterionMaxScore: z.number().positive().optional(),
 });
 
-/** Bir başka raporla tespit edilen benzerliğin bölüm bazlı kırılımı (varsa). */
+/** Şartnamedeki bir kurala karşı raporda tespit edilen somut bir bulgu. */
+export const specificationFindingSchema = z.object({
+  ruleText: z.string().min(1),
+  findingText: z.string().min(1),
+  severity: z.enum(["low", "medium", "high"]),
+  /** Yalnızca raporda gerçekten var olan bir alıntı için doldurulur. */
+  pageNumber: z.number().int().positive().optional(),
+  exactExcerpt: z.string().optional(),
+});
+
+export const specificationAnalysisSchema = z.object({
+  compliant: z.boolean(),
+  findings: z.array(specificationFindingSchema),
+  notes: z.string().min(1),
+});
+
+/**
+ * Bir başka raporla paylaşılan somut bir pasaj eşleşmesi — deterministik
+ * shingle karşılaştırmasından gelir (bkz. similarity.ts), sayfa+alıntı
+ * gerçek extractedPages içeriğinden dilimlenir, asla LLM tarafından üretilmez.
+ */
 export const similarityBreakdownItemSchema = z.object({
-  sectionLabel: z.string().min(1),
-  matchPercentage: z.number().min(0).max(100),
+  targetPage: z.number().int().positive(),
+  targetExcerpt: z.string().min(1),
+  matchedPage: z.number().int().positive(),
+  matchedExcerpt: z.string().min(1),
 });
 
 /**
@@ -87,6 +119,7 @@ export const similarReportMatchSchema = z.object({
 
 export const evaluationOutputSchema = z.object({
   languageAnalysis: languageAnalysisSchema,
+  specificationAnalysis: specificationAnalysisSchema,
   templateAnalysis: templateAnalysisSchema,
   headingContentAnalysis: z.array(headingContentAnalysisItemSchema).min(1),
   categoryFit: categoryFitSchema,
@@ -98,9 +131,29 @@ export const evaluationOutputSchema = z.object({
   similarReports: z.array(similarReportMatchSchema).default([]),
   /** En yüksek similarReports eşleşmesinin yüzdesi (varsa) — route tarafından set edilir. */
   similarityScore: z.number().min(0).max(100).optional(),
+  /**
+   * O anki şartname metni + şablon bölümleri + efektif kriterlerin hash'i
+   * (bkz. context-hash.ts). LLM bu alanı hiç üretmez; her zaman route
+   * tarafından set edilir — hangi konfigürasyonla üretildiğini kalıcı olarak
+   * işaretler (bkz. GET /api/reports'taki aiAnalysisStale hesaplaması).
+   */
+  contextHash: z.string().optional(),
+  /** Doğrulanmış (gerçek sayfa metninde bulunan) kanıt alıntıları — route tarafından hesaplanır. */
+  evidences: z
+    .array(
+      z.object({
+        id: z.string().min(1),
+        page: z.number().int().positive(),
+        excerpt: z.string().min(1),
+        note: z.string().optional(),
+      })
+    )
+    .default([]),
 });
 
 export type LanguageAnalysis = z.infer<typeof languageAnalysisSchema>;
+export type SpecificationFinding = z.infer<typeof specificationFindingSchema>;
+export type SpecificationAnalysis = z.infer<typeof specificationAnalysisSchema>;
 export type TemplateAnalysis = z.infer<typeof templateAnalysisSchema>;
 export type HeadingContentAnalysisItem = z.infer<
   typeof headingContentAnalysisItemSchema

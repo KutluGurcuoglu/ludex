@@ -44,6 +44,8 @@ export interface CategoryEvaluationCriterion {
 export interface CategoryRecord extends Category {
   templateSections: CategoryTemplateSection[];
   evaluationCriteria: CategoryEvaluationCriterion[];
+  /** Şartname PDF'inden gerçek metin çıkarımıyla elde edilen tam metin — AI evaluate prompt'una gider. */
+  specificationText: string | null;
 }
 
 /**
@@ -84,6 +86,7 @@ export interface CategoryRepository {
   create(input: CreateCategoryInput): Promise<CategoryRecord>;
   update(id: string, input: UpdateCategoryInput): Promise<CategoryRecord | null>;
   setSpecification(id: string, doc: CompetitionDocument): Promise<CategoryRecord | null>;
+  setSpecificationText(id: string, text: string | null): Promise<CategoryRecord | null>;
   setReportTemplate(id: string, doc: CompetitionDocument): Promise<CategoryRecord | null>;
   setTemplateSections(
     id: string,
@@ -119,6 +122,7 @@ function toCategoryRecord(row: PrismaCategory): CategoryRecord {
     slug: row.slug,
     description: row.description ?? undefined,
     specification: (row.specification as CompetitionDocument | null) ?? undefined,
+    specificationText: row.specificationText ?? null,
     reportTemplate: (row.reportTemplate as CompetitionDocument | null) ?? undefined,
     createdAt: row.createdAt.toISOString(),
     submissionOpensAt: row.submissionOpensAt?.toISOString() ?? null,
@@ -175,6 +179,17 @@ class PrismaCategoryRepository implements CategoryRepository {
     const row = await db.category.update({
       where: { id },
       data: { specification: doc as unknown as Prisma.InputJsonValue },
+    });
+    return toCategoryRecord(row);
+  }
+
+  async setSpecificationText(id: string, text: string | null): Promise<CategoryRecord | null> {
+    const exists = await db.category.findUnique({ where: { id }, select: { id: true } });
+    if (!exists) return null;
+
+    const row = await db.category.update({
+      where: { id },
+      data: { specificationText: text },
     });
     return toCategoryRecord(row);
   }

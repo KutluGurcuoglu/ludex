@@ -114,6 +114,7 @@ model Category {
   slug               String    @unique
   description        String?
   specification      Json?
+  specificationText  String?
   reportTemplate     Json?
   templateSections   Json      @default("[]")
   evaluationCriteria Json      @default("[]")
@@ -156,6 +157,7 @@ model Report {
   fileSize      Int
   r2Key         String
   extractedText String?
+  extractedPages Json?
   status        ReportStatus @default(PENDING_ASSIGNMENT)
   assignedAt    DateTime?
   submittedAt   DateTime     @default(now())
