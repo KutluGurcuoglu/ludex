@@ -973,7 +973,7 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
                     </div>
 
                     <Card className="overflow-hidden py-0">
-                      <ScrollArea className="max-h-[420px] px-4 py-4">
+                      <ScrollArea className="h-[420px] px-4 py-4">
                         <Accordion
                           type="multiple"
                           defaultValue={["language", "spec"]}
