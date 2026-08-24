@@ -27,14 +27,30 @@ interface RealEvaluationOutput {
   strengths: string[];
   areasForImprovement: string[];
   recommendations: string[];
+  /**
+   * Deterministik shingle/Jaccard benzerliğiyle hesaplanır (bkz.
+   * src/lib/ai-evaluation/similarity.ts) — LLM çıktısı değildir, ama aynı
+   * AI analiz kaydının parçası olarak API'den birlikte döner.
+   */
+  similarReports: Array<{
+    id: string;
+    reportLabel: string;
+    matchPercentage: number;
+    breakdown: Array<{ sectionLabel: string; matchPercentage: number }>;
+  }>;
+  similarityScore?: number;
 }
 
 /**
  * Gerçek AI çıktısını AIAnalysisResult şekline dönüştürür. Gerçek pipeline
- * kırmızı bayrak / kritik şartname bulgusu / benzerlik / AI yazım riski / genel
- * puan ÜRETMEZ (bkz. ai-evaluation/prompts.ts — bilerek böyle tasarlanmış,
- * hakemin nihai kararını AI'nın gölgelememesi için). Bu alanlar burada UYDURULMAZ;
- * boş/tanımsız bırakılır — ilgili UI bölümleri zaten bunlar boşken kendini gizliyor.
+ * kırmızı bayrak / kritik şartname bulgusu / AI yazım riski / genel puan
+ * ÜRETMEZ (bkz. ai-evaluation/prompts.ts — bilerek böyle tasarlanmış, hakemin
+ * nihai kararını AI'nın gölgelememesi için). Bu alanlar burada UYDURULMAZ;
+ * boş/tanımsız bırakılır — ilgili UI bölümleri zaten bunlar boşken kendini
+ * gizliyor. Benzerlik (similarReports/similarityScore) istisnadır: LLM'den
+ * gelmez ama route tarafından deterministik olarak hesaplanıp gerçek AI analiz
+ * kaydına eklenir (bkz. src/lib/ai-evaluation/similarity.ts) — o yüzden burada
+ * uydurulmadan doğrudan aktarılır.
  */
 function toAIAnalysisResult(reportId: string, output: RealEvaluationOutput): AIAnalysisResult {
   const templateCompliance: ComplianceCheckItem[] = output.headingContentAnalysis.map((h) => ({
@@ -77,7 +93,8 @@ function toAIAnalysisResult(reportId: string, output: RealEvaluationOutput): AIA
       improvementSuggestions: output.recommendations,
     },
 
-    similarReports: [],
+    similarReports: output.similarReports,
+    similarityScore: output.similarityScore,
     evidences: [],
   };
 }

@@ -4,6 +4,7 @@ import { requireRole } from "@/lib/auth/require-role";
 import { getReportRepository } from "@/lib/repositories/report-repository";
 import { getCategoryRepository } from "@/lib/repositories/category-repository";
 import { evaluateReport } from "@/lib/ai-evaluation/evaluate";
+import { findSimilarReports } from "@/lib/ai-evaluation/similarity";
 
 export async function POST(
   _req: Request,
@@ -56,12 +57,30 @@ export async function POST(
       evaluationCriteria: category.evaluationCriteria,
     });
 
-    await reportRepository.setAiEvaluation(report.id, evaluation);
+    // Benzerlik LLM tarafından üretilmez — deterministik olarak burada
+    // hesaplanır ve aynı AI analiz kaydına (AIAnalysis) eklenir. Yalnızca
+    // aynı kategorideki, extractedText'i dolu, kendisi olmayan raporlarla
+    // karşılaştırılır (bkz. src/lib/ai-evaluation/similarity.ts).
+    const allReports = await reportRepository.listAll();
+    const candidates = allReports.filter(
+      (r) => r.categoryId === report.categoryId && Boolean(r.extractedText)
+    );
+    const similarReports = findSimilarReports(
+      { id: report.id, extractedText: report.extractedText },
+      candidates.map((r) => ({ id: r.id, title: r.title, extractedText: r.extractedText ?? "" }))
+    );
+    const enrichedEvaluation = {
+      ...evaluation,
+      similarReports,
+      similarityScore: similarReports[0]?.matchPercentage,
+    };
+
+    await reportRepository.setAiEvaluation(report.id, enrichedEvaluation);
     if (report.status === "assigned") {
       await reportRepository.setStatus(report.id, "in_review");
     }
 
-    return NextResponse.json({ success: true, evaluation });
+    return NextResponse.json({ success: true, evaluation: enrichedEvaluation });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json(
