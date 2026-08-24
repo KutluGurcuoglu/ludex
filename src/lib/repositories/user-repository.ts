@@ -31,6 +31,27 @@ export interface UserRepository {
   findByEmail(email: string): Promise<UserRecord | null>;
   findById(id: string): Promise<UserRecord | null>;
   create(input: CreateUserInput): Promise<UserRecord>;
+  listJudges(): Promise<UserRecord[]>;
+  setJudgeApprovalStatus(id: string, status: JudgeApprovalStatus): Promise<UserRecord | null>;
+  setJudgeCategories(id: string, categoryIds: string[]): Promise<UserRecord | null>;
+}
+
+/**
+ * `UserRecord`'u API yanıtı için güvenli bir alt kümeye indirger —
+ * passwordHash veya başka hassas alan asla dışarı sızmaz.
+ */
+export function toSafeJudgeSummary(user: UserRecord) {
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    phone: user.phone,
+    role: user.role,
+    categoryIds: user.categoryIds,
+    createdAt: user.createdAt,
+    judgeApprovalStatus: user.judgeApprovalStatus,
+    judgeWorkStatus: user.judgeWorkStatus,
+  };
 }
 
 const ROLE_TO_DOMAIN: Record<Role, UserRole> = {
@@ -48,6 +69,12 @@ const APPROVAL_STATUS_TO_DOMAIN: Record<ApplicationStatus, JudgeApprovalStatus> 
   [ApplicationStatus.PENDING]: "pending",
   [ApplicationStatus.APPROVED]: "approved",
   [ApplicationStatus.REJECTED]: "rejected",
+};
+
+const APPROVAL_STATUS_TO_PRISMA: Record<JudgeApprovalStatus, ApplicationStatus> = {
+  pending: ApplicationStatus.PENDING,
+  approved: ApplicationStatus.APPROVED,
+  rejected: ApplicationStatus.REJECTED,
 };
 
 const WORK_STATUS_TO_DOMAIN: Record<PrismaJudgeWorkStatus, JudgeWorkStatus> = {
@@ -110,6 +137,42 @@ class PrismaUserRepository implements UserRepository {
       ...userWithCategories,
     });
     return toUserRecord(user);
+  }
+
+  async listJudges(): Promise<UserRecord[]> {
+    const users = await db.user.findMany({
+      where: { role: Role.JUDGE },
+      ...userWithCategories,
+      orderBy: { createdAt: "asc" },
+    });
+    return users.map(toUserRecord);
+  }
+
+  async setJudgeApprovalStatus(id: string, status: JudgeApprovalStatus): Promise<UserRecord | null> {
+    const existing = await db.user.findUnique({ where: { id }, select: { role: true } });
+    if (!existing || existing.role !== Role.JUDGE) return null;
+
+    const user = await db.user.update({
+      where: { id },
+      data: { judgeApprovalStatus: APPROVAL_STATUS_TO_PRISMA[status] },
+      ...userWithCategories,
+    });
+    return toUserRecord(user);
+  }
+
+  async setJudgeCategories(id: string, categoryIds: string[]): Promise<UserRecord | null> {
+    const existing = await db.user.findUnique({ where: { id }, select: { role: true } });
+    if (!existing || existing.role !== Role.JUDGE) return null;
+
+    await db.$transaction([
+      db.judgeCategory.deleteMany({ where: { userId: id } }),
+      ...(categoryIds.length > 0
+        ? [db.judgeCategory.createMany({ data: categoryIds.map((categoryId) => ({ userId: id, categoryId })) })]
+        : []),
+    ]);
+
+    const user = await db.user.findUnique({ where: { id }, ...userWithCategories });
+    return user ? toUserRecord(user) : null;
   }
 }
 
