@@ -19,11 +19,28 @@ enum ApplicationStatus {
   REJECTED
 }
 
+enum JudgeWorkStatus {
+  WORKING
+  STUDYING
+  BOTH
+}
+
 enum ReportStatus {
+  PENDING_ASSIGNMENT
+  ASSIGNED
+  IN_REVIEW
+  COMPLETED
+  DISQUALIFIED
+}
+
+enum EvaluationStatus {
   DRAFT
   SUBMITTED
-  UNDER_REVIEW
-  EVALUATED
+}
+
+enum DisqualificationDecision {
+  UPHELD
+  DISMISSED
 }
 
 enum OutboxStatus {
@@ -33,20 +50,23 @@ enum OutboxStatus {
 }
 
 model User {
-  id           String   @id @default(uuid())
-  email        String   @unique
-  passwordHash String
-  fullName     String
-  role         Role     @default(CONTESTANT)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id                  String             @id @default(uuid())
+  email               String             @unique
+  passwordHash        String
+  fullName            String
+  phone               String
+  role                Role               @default(CONTESTANT)
+  judgeApprovalStatus ApplicationStatus?
+  judgeWorkStatus     JudgeWorkStatus?
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
 
   sessions            Session[]
   passwordResetTokens PasswordResetToken[]
   judgeApplication    JudgeApplication?
   judgeCategories     JudgeCategory[]
-  reports             Report[]             @relation("ContestantReports")
-  assignedReports     Report[]             @relation("AssignedJudgeReports")
+  reports             Report[]                @relation("ContestantReports")
+  judgeAssignments    ReportJudgeAssignment[]
   judgeEvaluations    JudgeEvaluation[]
   auditLogs           AuditLog[]
 
@@ -89,15 +109,20 @@ model JudgeApplication {
 }
 
 model Category {
-  id          String   @id @default(uuid())
-  name        String   @unique
-  description String?
-  createdAt   DateTime @default(now())
+  id                 String    @id @default(uuid())
+  name               String    @unique
+  slug               String    @unique
+  description        String?
+  specification      Json?
+  reportTemplate     Json?
+  templateSections   Json      @default("[]")
+  evaluationCriteria Json      @default("[]")
+  submissionOpensAt  DateTime?
+  submissionClosesAt DateTime?
+  createdAt          DateTime  @default(now())
 
-  judgeCategories   JudgeCategory[]
-  categoryDocuments CategoryDocument[]
-  reportTemplates   ReportTemplate[]
-  reports           Report[]
+  judgeCategories JudgeCategory[]
+  reports         Report[]
 }
 
 model JudgeCategory {
@@ -110,91 +135,48 @@ model JudgeCategory {
   @@id([userId, categoryId])
 }
 
-model CategoryDocument {
-  id         String   @id @default(uuid())
-  categoryId String
-  fileName   String
-  fileUrl    String
-  mimeType   String
-  fileSize   Int
-  createdAt  DateTime @default(now())
-
-  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
-}
-
-model ReportTemplate {
+model ScoreCriterion {
   id          String   @id @default(uuid())
-  categoryId  String
-  title       String
+  label       String   @unique
+  maxScore    Float
   description String?
   createdAt   DateTime @default(now())
 
-  category Category          @relation(fields: [categoryId], references: [id], onDelete: Cascade)
-  versions TemplateVersion[]
-  reports  Report[]
-}
-
-model TemplateVersion {
-  id         String   @id @default(uuid())
-  templateId String
-  version    Int
-  isActive   Boolean  @default(true)
-  createdAt  DateTime @default(now())
-
-  template ReportTemplate        @relation(fields: [templateId], references: [id], onDelete: Cascade)
-  sections TemplateSection[]
-  criteria EvaluationCriterion[]
-  reports  Report[]
-}
-
-model TemplateSection {
-  id                String  @id @default(uuid())
-  templateVersionId String
-  title             String
-  order             Int
-  description       String?
-
-  templateVersion TemplateVersion @relation(fields: [templateVersionId], references: [id], onDelete: Cascade)
-}
-
-model EvaluationCriterion {
-  id                String @id @default(uuid())
-  templateVersionId String
-  title             String
-  maxScore          Float
-  weight            Float  @default(1.0)
-
-  templateVersion TemplateVersion  @relation(fields: [templateVersionId], references: [id], onDelete: Cascade)
-  scores          CriterionScore[]
+  criterionScores CriterionScore[]
 }
 
 model Report {
-  id                String       @id @default(uuid())
-  title             String
-  contestantId      String
-  categoryId        String
-  templateId        String
-  templateVersionId String
-  assignedJudgeId   String?
-  status            ReportStatus @default(DRAFT)
-  fileName          String
-  fileUrl           String
-  mimeType          String
-  fileSize          Int
-  createdAt         DateTime     @default(now())
-  updatedAt         DateTime     @updatedAt
+  id            String       @id @default(uuid())
+  title         String
+  contestantId  String
+  categoryId    String
+  fileName      String
+  fileSize      Int
+  r2Key         String
+  extractedText String?
+  status        ReportStatus @default(PENDING_ASSIGNMENT)
+  assignedAt    DateTime?
+  submittedAt   DateTime     @default(now())
 
-  contestant      User            @relation("ContestantReports", fields: [contestantId], references: [id], onDelete: Cascade)
-  category        Category        @relation(fields: [categoryId], references: [id])
-  template        ReportTemplate  @relation(fields: [templateId], references: [id])
-  templateVersion TemplateVersion @relation(fields: [templateVersionId], references: [id])
-  assignedJudge   User?           @relation("AssignedJudgeReports", fields: [assignedJudgeId], references: [id], onDelete: SetNull)
+  contestant User     @relation("ContestantReports", fields: [contestantId], references: [id], onDelete: Cascade)
+  category   Category @relation(fields: [categoryId], references: [id])
 
+  judgeAssignments ReportJudgeAssignment[]
   aiAnalysis       AIAnalysis?
   judgeEvaluations JudgeEvaluation[]
 
   @@index([contestantId])
-  @@index([assignedJudgeId])
+}
+
+model ReportJudgeAssignment {
+  reportId   String
+  judgeId    String
+  assignedAt DateTime @default(now())
+
+  report Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  judge  User   @relation(fields: [judgeId], references: [id], onDelete: Cascade)
+
+  @@id([reportId, judgeId])
 }
 
 model AIAnalysis {
@@ -207,12 +189,23 @@ model AIAnalysis {
 }
 
 model JudgeEvaluation {
-  id         String   @id @default(uuid())
-  reportId   String
-  judgeId    String
-  comment    String?
-  totalScore Float
-  createdAt  DateTime @default(now())
+  id                  String           @id @default(uuid())
+  reportId            String
+  judgeId             String
+  overallComment      String
+  totalScore          Float
+  status              EvaluationStatus @default(DRAFT)
+  visibleToContestant Boolean          @default(false)
+
+  disqualificationFindingId      String?
+  disqualificationRuleText       String?
+  disqualificationFindingText    String?
+  disqualificationEvidenceId     String?
+  disqualificationDecidedAt      DateTime?
+  disqualificationAdminDecision  DisqualificationDecision?
+  disqualificationAdminDecidedAt DateTime?
+
+  updatedAt DateTime @updatedAt
 
   report Report           @relation(fields: [reportId], references: [id], onDelete: Cascade)
   judge  User             @relation(fields: [judgeId], references: [id], onDelete: Cascade)
@@ -222,13 +215,14 @@ model JudgeEvaluation {
 }
 
 model CriterionScore {
-  id           String @id @default(uuid())
+  id           String  @id @default(uuid())
   evaluationId String
   criterionId  String
   score        Float
+  comment      String?
 
-  evaluation JudgeEvaluation     @relation(fields: [evaluationId], references: [id], onDelete: Cascade)
-  criterion  EvaluationCriterion @relation(fields: [criterionId], references: [id], onDelete: Cascade)
+  evaluation JudgeEvaluation @relation(fields: [evaluationId], references: [id], onDelete: Cascade)
+  criterion  ScoreCriterion  @relation(fields: [criterionId], references: [id])
 
   @@unique([evaluationId, criterionId])
 }
