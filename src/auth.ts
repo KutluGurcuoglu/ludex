@@ -1,80 +1,68 @@
-import NextAuth from "next-auth";
-import Credentials from "next-auth/providers/credentials";
-import { getUserRepository } from "@/lib/repositories/user-repository";
-import { verifyPassword } from "@/lib/auth/password";
-import { loginCredentialsSchema } from "@/lib/auth/schema";
-import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
+import NextAuth, { NextAuthOptions } from "next-auth";
+import CredentialsProvider from "next-auth/providers/credentials";
+import { checkRateLimit } from "@/lib/rate-limit";
+import { getClientIp } from "@/lib/ip";
+import { authenticateUser } from "@/lib/auth/service";
 
-const LOGIN_RATE_LIMIT = 10;
-const LOGIN_RATE_WINDOW_MS = 5 * 60 * 1000; // 5 dakika
+const LOGIN_RATE_LIMIT = 5;
+const LOGIN_RATE_WINDOW_MS = 15 * 60 * 1000;
 
-export const { handlers, signIn, signOut, auth } = NextAuth({
-  // TODO(db): "jwt" oturum stratejisi kullanılıyor çünkü henüz kalıcı bir
-  // Session tablosu (Prisma) yok. feat/database-foundation birleşince
-  // "database" stratejisine ve gerçek bir Adapter'a geçilmeli — bu, admin'in
-  // bir hakemin oturumunu anında iptal edebilmesini sağlar (JWT'de bu mümkün
-  // değildir, token süresi dolana kadar geçerli kalır).
-  //
-  // Aynı sebeple categoryIds/judgeApprovalStatus yalnızca giriş anında token'a
-  // yazılır — admin bir hakemi zaten oturum açıkken onaylarsa, hakem tekrar
-  // giriş yapana kadar bunu görmez. "database" stratejisine geçince bu da
-  // çözülür (session her istekte DB'den taze okunabilir).
-  session: { strategy: "jwt" },
-  pages: {
-    signIn: "/login",
-  },
+export const authOptions: NextAuthOptions = {
   providers: [
-    Credentials({
+    CredentialsProvider({
+      name: "Credentials",
       credentials: {
-        email: { type: "email", label: "E-posta" },
-        password: { type: "password", label: "Şifre" },
+        email: { label: "Email", type: "email" },
+        password: { label: "Password", type: "password" },
       },
-      authorize: async (rawCredentials, request) => {
-        const ip = getClientIp(request);
+      async authorize(rawCredentials, request) {
+        const ip = getClientIp(request as any);
+
         if (!checkRateLimit(`login:${ip}`, LOGIN_RATE_LIMIT, LOGIN_RATE_WINDOW_MS)) {
-          // Normal "hatalı kimlik bilgisi" ile aynı şekilde ele alınır — auth.service.ts
-          // zaten her authorize() reddini aynı genel mesaja eşliyor (bkz. login()).
+          throw new Error("Çok fazla hatalı giriş denemesi. Lütfen daha sonra tekrar deneyin.");
+        }
+
+        if (!rawCredentials?.email || !rawCredentials?.password) {
           return null;
         }
 
-        const parsed = loginCredentialsSchema.safeParse(rawCredentials);
-        if (!parsed.success) return null;
+        const user = await authenticateUser(rawCredentials.email, rawCredentials.password);
 
-        const { email, password } = parsed.data;
-        const userRepository = getUserRepository();
-        const user = await userRepository.findByEmail(email);
-        if (!user) return null;
-
-        const passwordMatches = await verifyPassword(password, user.passwordHash);
-        if (!passwordMatches) return null;
+        if (!user) {
+          return null;
+        }
 
         return {
           id: user.id,
-          name: user.name,
           email: user.email,
+          name: user.name,
           role: user.role,
-          categoryIds: user.categoryIds,
-          judgeApprovalStatus: user.judgeApprovalStatus,
         };
       },
     }),
   ],
   callbacks: {
-    jwt: ({ token, user }) => {
+    async jwt({ token, user }) {
       if (user) {
-        token.id = user.id as string;
-        token.role = user.role;
-        token.categoryIds = user.categoryIds;
-        token.judgeApprovalStatus = user.judgeApprovalStatus;
+        token.id = user.id;
+        token.role = (user as any).role;
       }
       return token;
     },
-    session: ({ session, token }) => {
-      session.user.id = token.id;
-      session.user.role = token.role;
-      session.user.categoryIds = token.categoryIds;
-      session.user.judgeApprovalStatus = token.judgeApprovalStatus;
+    async session({ session, token }) {
+      if (session.user) {
+        (session.user as any).id = token.id;
+        (session.user as any).role = token.role;
+      }
       return session;
     },
   },
-});
+  pages: {
+    signIn: "/login",
+  },
+  session: {
+    strategy: "jwt",
+  },
+};
+
+export default NextAuth(authOptions);
