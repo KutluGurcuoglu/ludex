@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireRole } from "@/lib/auth/require-role";
 import { getCategoryRepository } from "@/lib/repositories/category-repository";
 import { getStorageProvider } from "@/lib/storage";
+import { deriveTemplateSectionFromStorageKey } from "@/lib/text-extraction/report-template";
 
 const bodySchema = z.object({
   fileName: z.string().trim().min(1).max(255),
@@ -44,7 +45,27 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
     );
   }
 
-  const category = await getCategoryRepository().setReportTemplate(id, {
+  // AI evaluate'in ihtiyaç duyduğu template.sections, admin panelinde ayrıca
+  // elle girilmiyor — yüklenen PDF'in gerçek metninden burada, yükleme anında
+  // deterministik olarak türetilip kalıcı hale getirilir (bkz.
+  // deriveTemplateSectionFromStorageKey). PDF okunamazsa şablon hiç
+  // kaydedilmez; admin'e açık bir hata döner.
+  let templateSection: { title: string; expectedContent: string };
+  try {
+    templateSection = await deriveTemplateSectionFromStorageKey(parsed.data.key);
+  } catch (error) {
+    console.error(`Rapor şablonu metin çıkarma hatası (kategori ${id}):`, error);
+    return NextResponse.json(
+      {
+        error:
+          "Rapor şablonu PDF'ten metin çıkarılamadı (taranmış görüntü tabanlı bir PDF olabilir). Lütfen metin içeren bir PDF yükleyin.",
+      },
+      { status: 400 }
+    );
+  }
+
+  const categoryRepository = getCategoryRepository();
+  const category = await categoryRepository.setReportTemplate(id, {
     fileName: parsed.data.fileName,
     fileUrl: parsed.data.key,
     fileSizeBytes: head.contentLength,
@@ -54,5 +75,7 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
     return NextResponse.json({ error: "Kategori bulunamadı." }, { status: 404 });
   }
 
-  return NextResponse.json({ success: true, category });
+  const updated = await categoryRepository.setTemplateSections(id, [templateSection]);
+
+  return NextResponse.json({ success: true, category: updated ?? category });
 }

@@ -218,7 +218,8 @@ type AnalysisState =
   | "awaiting-decision"
   | "continuing"
   | "done"
-  | "eliminated";
+  | "eliminated"
+  | "error";
 
 const ANALYSIS_STEPS = [
   "Dil ve şartname denetleniyor...",
@@ -298,6 +299,7 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
   const [isLoading, setIsLoading] = useState(true);
   const [analysisState, setAnalysisState] = useState<AnalysisState>("idle");
   const [analysis, setAnalysis] = useState<AIAnalysisResult | null>(null);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [loadingStepIndex, setLoadingStepIndex] = useState(0);
   const [copilotOpen, setCopilotOpen] = useState(false);
   const [compactCompliance, setCompactCompliance] = useState(false);
@@ -430,12 +432,21 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
 
   async function handleStartAnalysis() {
     setAnalysisState("checking");
+    setAnalysisError(null);
     setLoadingStepIndex(0);
     await simulateNetworkDelay(null, 900, 1100);
-    const result = await aiAnalysisService.getAIAnalysis(reportId);
+
+    let result: AIAnalysisResult;
+    try {
+      result = await aiAnalysisService.getAIAnalysis(reportId);
+    } catch (error) {
+      setAnalysisState("error");
+      setAnalysisError(error instanceof Error ? error.message : "AI analizi başlatılamadı.");
+      return;
+    }
     setAnalysis(result);
 
-    if (result && buildGateFindings(result).length > 0) {
+    if (buildGateFindings(result).length > 0) {
       setAnalysisState("awaiting-decision");
       return;
     }
@@ -472,12 +483,13 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
       .then(() => aiAnalysisService.getAIAnalysis(reportId))
       .then((result) => {
         if (!active) return;
-        if (result) {
-          setAnalysis(result);
-          setAnalysisState("done");
-        } else {
-          setAnalysisState("idle");
-        }
+        setAnalysis(result);
+        setAnalysisState("done");
+      })
+      .catch((error) => {
+        if (!active) return;
+        setAnalysisState("error");
+        setAnalysisError(error instanceof Error ? error.message : "AI analizi alınamadı.");
       });
     return () => {
       active = false;
@@ -715,6 +727,30 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
                       >
                         <Sparkles className="size-4" />
                         Ludex Analizine Başla
+                      </Button>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {analysisState === "error" && (
+                  <Card className="border-red-300 dark:border-red-900">
+                    <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
+                      <div className="flex size-14 items-center justify-center rounded-2xl bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-400">
+                        <AlertOctagon className="size-7" />
+                      </div>
+                      <div>
+                        <p className="text-base font-semibold">Ludex analizi başlatılamadı</p>
+                        <p className="mt-1 max-w-xs text-base text-muted-foreground">
+                          {analysisError ?? "Analiz sırasında bir hata oluştu."}
+                        </p>
+                      </div>
+                      <Button
+                        onClick={handleStartAnalysis}
+                        variant="outline"
+                        className="mt-2 gap-2 transition-transform active:scale-[0.98]"
+                      >
+                        <Sparkles className="size-4" />
+                        Tekrar Dene
                       </Button>
                     </CardContent>
                   </Card>

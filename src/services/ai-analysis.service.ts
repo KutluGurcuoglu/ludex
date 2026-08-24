@@ -99,14 +99,12 @@ function toAIAnalysisResult(reportId: string, output: RealEvaluationOutput): AIA
   };
 }
 
-export async function getAIAnalysis(reportId: string): Promise<AIAnalysisResult | null> {
+export async function getAIAnalysis(reportId: string): Promise<AIAnalysisResult> {
   const res = await fetch(`/api/reports/${reportId}/evaluate`, { method: "POST" });
+  const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    console.error(`AI analizi alınamadı (report ${reportId}):`, data.error ?? res.status);
-    return null;
+    throw new Error(data.error ?? "AI analizi alınamadı.");
   }
 
-  const data = await res.json();
   return toAIAnalysisResult(reportId, data.evaluation);
 }
