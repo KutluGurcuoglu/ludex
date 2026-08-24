@@ -43,4 +43,15 @@ describe("verifyExcerpt", () => {
     expect(verifyExcerpt(null, 1, "en az iki bağımsız sensör")).toBeNull();
     expect(verifyExcerpt([], 1, "en az iki bağımsız sensör")).toBeNull();
   });
+
+  it("rejects an excerpt with no real substance, even if it literally appears on the page", () => {
+    const pagesWithSymbolOnly = [{ pageNumber: 1, text: "#" }];
+    expect(verifyExcerpt(pagesWithSymbolOnly, 1, "#")).toBeNull();
+    expect(verifyExcerpt(PAGES, 2, "  ---  ")).toBeNull();
+  });
+
+  it("still accepts a short but meaningful excerpt", () => {
+    const result = verifyExcerpt(PAGES, 2, "iki");
+    expect(result).toEqual({ page: 2, excerpt: "iki" });
+  });
 });
