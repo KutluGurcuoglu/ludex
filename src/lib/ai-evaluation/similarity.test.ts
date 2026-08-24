@@ -90,4 +90,48 @@ describe("findSimilarReports", () => {
     );
     expect(matches).toHaveLength(0);
   });
+
+  it("returns an empty breakdown when no page-level text was provided", () => {
+    const matches = findSimilarReports(
+      { id: "report-a", extractedText: REPORT_A },
+      [{ id: "report-b", title: "Otonom İHA Rota Planlama", extractedText: REPORT_B_NEAR_DUPLICATE }]
+    );
+    expect(matches[0].breakdown).toEqual([]);
+  });
+
+  it("locates a real shared passage on its real page in both reports", () => {
+    const sharedSentence =
+      "Otonom görev planlama modülü gerçek zamanlı sensör verisiyle çalışır ve rota üretir.";
+    const targetPages = [
+      { pageNumber: 1, text: "Bu proje insansız hava aracı sistemleri üzerine kapsamlı bir çalışmadır." },
+      { pageNumber: 6, text: sharedSentence },
+    ];
+    const candidatePages = [
+      { pageNumber: 1, text: "Farklı bir giriş metni burada yer alır ve konuyu tanıtır." },
+      { pageNumber: 4, text: sharedSentence },
+    ];
+    const targetText = targetPages.map((p) => p.text).join(" ") + " " + REPORT_A;
+    const candidateText = candidatePages.map((p) => p.text).join(" ") + " " + REPORT_B_NEAR_DUPLICATE;
+
+    const matches = findSimilarReports(
+      { id: "report-a", extractedText: targetText, pages: targetPages },
+      [
+        {
+          id: "report-b",
+          title: "Otonom İHA Rota Planlama",
+          extractedText: candidateText,
+          pages: candidatePages,
+        },
+      ]
+    );
+
+    expect(matches).toHaveLength(1);
+    expect(matches[0].breakdown.length).toBeGreaterThan(0);
+    const passage = matches[0].breakdown[0];
+    expect(passage.targetPage).toBe(6);
+    expect(passage.matchedPage).toBe(4);
+    // Alıntı, hedef/eşleşen sayfanın GERÇEK metninde birebir geçmeli — uydurma değil.
+    expect(targetPages[1].text).toContain(passage.targetExcerpt);
+    expect(candidatePages[1].text).toContain(passage.matchedExcerpt);
+  });
 });

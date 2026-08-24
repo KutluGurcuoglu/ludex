@@ -1,0 +1,71 @@
+import { describe, expect, it } from "vitest";
+import { attachVerifiedEvidence } from "./postprocess";
+import type { EvaluationOutput } from "./schema";
+
+const PAGES = [
+  { pageNumber: 1, text: "Giriş bölümü burada başlar." },
+  { pageNumber: 2, text: "Sistem en az iki bağımsız sensör kullanır." },
+];
+
+function baseEvaluation(): EvaluationOutput {
+  return {
+    languageAnalysis: { detectedLanguage: "Türkçe", confidence: 0.95, summary: "Ok", issues: [] },
+    specificationAnalysis: {
+      compliant: false,
+      findings: [
+        {
+          ruleText: "En az iki sensör zorunludur.",
+          findingText: "Rapor bunu doğruluyor.",
+          severity: "high",
+          pageNumber: 2,
+          exactExcerpt: "en az iki bağımsız sensör",
+        },
+        {
+          ruleText: "Uydurulmuş bir kural.",
+          findingText: "Raporda gerçekte olmayan bir alıntı.",
+          severity: "high",
+          pageNumber: 2,
+          exactExcerpt: "bu cümle raporda yok",
+        },
+      ],
+      notes: "notlar",
+    },
+    templateAnalysis: { compliant: true, missingSections: [], notes: "notlar" },
+    headingContentAnalysis: [
+      { sectionId: "sec-1", headingPresent: true, contentMatchesExpectation: true, notes: "ok" },
+    ],
+    categoryFit: { fit: true, reason: "uygun" },
+    criteriaEvaluations: [{ criterionId: "crit-1", score: 8, reason: "iyi" }],
+    strengths: [],
+    areasForImprovement: [],
+    recommendations: [],
+    similarReports: [],
+    evidences: [],
+  };
+}
+
+describe("attachVerifiedEvidence", () => {
+  it("keeps a verified finding's pageNumber/exactExcerpt and adds it to evidences", () => {
+    const result = attachVerifiedEvidence(baseEvaluation(), PAGES);
+    const verifiedFinding = result.specificationAnalysis.findings[0];
+    expect(verifiedFinding.pageNumber).toBe(2);
+    expect(verifiedFinding.exactExcerpt).toBe("en az iki bağımsız sensör");
+    expect(result.evidences).toContainEqual(
+      expect.objectContaining({ id: "spec-0", page: 2, excerpt: "en az iki bağımsız sensör" })
+    );
+  });
+
+  it("strips a fabricated excerpt and does not add fake evidence for it", () => {
+    const result = attachVerifiedEvidence(baseEvaluation(), PAGES);
+    const fabricatedFinding = result.specificationAnalysis.findings[1];
+    expect(fabricatedFinding.pageNumber).toBeUndefined();
+    expect(fabricatedFinding.exactExcerpt).toBeUndefined();
+    expect(result.evidences.find((e) => e.id === "spec-1")).toBeUndefined();
+  });
+
+  it("produces no evidences when the report has no page data", () => {
+    const result = attachVerifiedEvidence(baseEvaluation(), null);
+    expect(result.evidences).toEqual([]);
+    expect(result.specificationAnalysis.findings.every((f) => f.pageNumber === undefined)).toBe(true);
+  });
+});
