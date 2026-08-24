@@ -13,13 +13,12 @@ import { formatDate, STATUS_BADGE_CLASS, STATUS_LABEL, useViewMode } from "../_l
 
 export default function AdminContestantsPage() {
   const categories = useAppStore((s) => s.categories);
-  const users = useAppStore((s) => s.users);
+  const contestants = useAppStore((s) => s.contestants);
   const reports = useAppStore((s) => s.reports);
   const evaluations = useAppStore((s) => s.evaluations);
   const globalScoreCriteria = useAppStore((s) => s.scoreCriteria);
   const { viewMode } = useViewMode();
 
-  const contestants = useMemo(() => users.filter((u) => u.role === "contestant"), [users]);
   const [contestantSearch, setContestantSearch] = useState("");
   const [selectedContestantId, setSelectedContestantId] = useState<string | null>(null);
 

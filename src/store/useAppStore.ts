@@ -417,6 +417,8 @@ export interface AppState {
   users: User[];
   /** Admin'in hakem atama/onay ekranlarının okuduğu, gerçek backend'den gelen hakem listesi. */
   judges: User[];
+  /** Admin'in Yarışmacılar ekranının okuduğu, gerçek backend'den gelen yarışmacı listesi. */
+  contestants: User[];
   credentials: Record<string, string>;
   reports: Report[];
   evaluations: JudgeEvaluation[];
@@ -439,6 +441,7 @@ export interface AppState {
   setScoreCriteria: (criteria: ScoreCriterion[]) => void;
   setUsers: (users: User[]) => void;
   setJudges: (judges: User[]) => void;
+  setContestants: (contestants: User[]) => void;
 
   markNotificationRead: (id: string) => void;
   markAllNotificationsRead: (userId: string) => void;
@@ -579,6 +582,7 @@ export const useAppStore = create<AppState>()(
       faqs: SEED_FAQS,
       users: SEED_USERS.map((u) => ({ ...u, emailVerifiedAt: u.createdAt })),
       judges: [],
+      contestants: [],
       credentials: SEED_CREDENTIALS,
       reports: SEED_REPORTS,
       evaluations: SEED_EVALUATIONS,
@@ -938,6 +942,7 @@ export const useAppStore = create<AppState>()(
       setScoreCriteria: (criteria) => set({ scoreCriteria: criteria }),
       setUsers: (users) => set({ users }),
       setJudges: (judges) => set({ judges }),
+      setContestants: (contestants) => set({ contestants }),
 
       updateProfile: (userId, updates) => {
         set((state) => ({

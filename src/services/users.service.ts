@@ -10,10 +10,11 @@ export function getJudges(): Promise<User[]> {
   return simulateNetworkDelay(useAppStore.getState().users.filter((u) => u.role === "judge"));
 }
 
-export function getContestants(): Promise<User[]> {
-  return simulateNetworkDelay(
-    useAppStore.getState().users.filter((u) => u.role === "contestant"),
-  );
+export async function getContestants(): Promise<User[]> {
+  const res = await fetch("/api/users?role=contestant");
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error ?? "Yarışmacı listesi alınamadı.");
+  return data.users;
 }
 
 export function updateProfile(

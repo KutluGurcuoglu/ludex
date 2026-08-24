@@ -32,6 +32,7 @@ export interface UserRepository {
   findById(id: string): Promise<UserRecord | null>;
   create(input: CreateUserInput): Promise<UserRecord>;
   listJudges(): Promise<UserRecord[]>;
+  listContestants(): Promise<UserRecord[]>;
   setJudgeApprovalStatus(id: string, status: JudgeApprovalStatus): Promise<UserRecord | null>;
   setJudgeCategories(id: string, categoryIds: string[]): Promise<UserRecord | null>;
 }
@@ -51,6 +52,18 @@ export function toSafeJudgeSummary(user: UserRecord) {
     createdAt: user.createdAt,
     judgeApprovalStatus: user.judgeApprovalStatus,
     judgeWorkStatus: user.judgeWorkStatus,
+  };
+}
+
+/** Contestant için daha da dar bir güvenli alt küme — judge'a özel alanlar hiç yok. */
+export function toSafeContestantSummary(user: UserRecord) {
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    phone: user.phone,
+    role: user.role,
+    createdAt: user.createdAt,
   };
 }
 
@@ -142,6 +155,15 @@ class PrismaUserRepository implements UserRepository {
   async listJudges(): Promise<UserRecord[]> {
     const users = await db.user.findMany({
       where: { role: Role.JUDGE },
+      ...userWithCategories,
+      orderBy: { createdAt: "asc" },
+    });
+    return users.map(toUserRecord);
+  }
+
+  async listContestants(): Promise<UserRecord[]> {
+    const users = await db.user.findMany({
+      where: { role: Role.CONTESTANT },
       ...userWithCategories,
       orderBy: { createdAt: "asc" },
     });

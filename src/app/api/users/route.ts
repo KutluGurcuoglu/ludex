@@ -1,15 +1,20 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireRole } from "@/lib/auth/require-role";
-import { getUserRepository, toSafeJudgeSummary } from "@/lib/repositories/user-repository";
+import {
+  getUserRepository,
+  toSafeContestantSummary,
+  toSafeJudgeSummary,
+} from "@/lib/repositories/user-repository";
 
-const querySchema = z.object({ role: z.literal("judge") });
+const querySchema = z.object({ role: z.enum(["judge", "contestant"]) });
 
 /**
- * Genel kullanıcı listeleme ucu. Şu an yalnızca ?role=judge destekleniyor —
- * admin'in hakem atama ve onay ekranlarının gerçek DB verisine bağlanması
- * için. passwordHash ya da başka hassas bir alan asla dönmez (bkz.
- * toSafeJudgeSummary). Yalnızca admin erişebilir.
+ * Genel kullanıcı listeleme ucu — yalnızca ?role=judge ve ?role=contestant
+ * destekleniyor (admin'in hakem atama/onay ve yarışmacı ekranlarının gerçek
+ * DB verisine bağlanması için). passwordHash ya da başka hassas bir alan
+ * asla dönmez (bkz. toSafeJudgeSummary/toSafeContestantSummary). Yalnızca
+ * admin erişebilir.
  */
 export async function GET(req: Request) {
   const session = await requireRole("admin");
@@ -20,9 +25,18 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const parsed = querySchema.safeParse({ role: searchParams.get("role") });
   if (!parsed.success) {
-    return NextResponse.json({ error: "Yalnızca ?role=judge destekleniyor." }, { status: 400 });
+    return NextResponse.json(
+      { error: "Yalnızca ?role=judge veya ?role=contestant destekleniyor." },
+      { status: 400 }
+    );
   }
 
-  const judges = await getUserRepository().listJudges();
-  return NextResponse.json({ users: judges.map(toSafeJudgeSummary) });
+  const userRepository = getUserRepository();
+  if (parsed.data.role === "judge") {
+    const judges = await userRepository.listJudges();
+    return NextResponse.json({ users: judges.map(toSafeJudgeSummary) });
+  }
+
+  const contestants = await userRepository.listContestants();
+  return NextResponse.json({ users: contestants.map(toSafeContestantSummary) });
 }

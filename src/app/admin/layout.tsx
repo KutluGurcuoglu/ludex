@@ -28,6 +28,7 @@ import {
   refreshEvaluations,
   refreshScoreCriteria,
   refreshJudges,
+  refreshContestants,
 } from "@/services/sync";
 import {
   AdminSkeleton,
@@ -51,7 +52,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 function AdminShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
-  const users = useAppStore((s) => s.users);
+  const contestants = useAppStore((s) => s.contestants);
   const judges = useAppStore((s) => s.judges);
   const evaluations = useAppStore((s) => s.evaluations);
   const reports = useAppStore((s) => s.reports);
@@ -70,6 +71,7 @@ function AdminShell({ children }: { children: React.ReactNode }) {
       refreshEvaluations(),
       refreshScoreCriteria(),
       refreshJudges(),
+      refreshContestants(),
       supportService.getSupportMessages(),
     ])
       .catch((error) => {
@@ -83,7 +85,6 @@ function AdminShell({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  const contestants = useMemo(() => users.filter((u) => u.role === "contestant"), [users]);
   const pendingJudgeApplications = useMemo(
     () =>
       judges.filter(
