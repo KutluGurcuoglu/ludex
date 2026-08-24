@@ -3,11 +3,12 @@ export interface ExtractedDocument {
 }
 
 /**
- * R2'deki bir PDF nesnesinden metin çıkaran servise port.
- * LLAMA_CLOUD_API_KEY tanımlıysa gerçek LlamaParse implementasyonu,
- * tanımlı değilse geliştirme için mock implementasyonu kullanılır
- * (bkz. src/lib/text-extraction/index.ts).
+ * Depolanmış bir PDF nesnesinden metin çıkaran servise port (R2 ya da yerel
+ * depolama — hangisi aktifse, bkz. src/lib/storage). LLAMA_CLOUD_API_KEY
+ * tanımlıysa gerçek LlamaParse implementasyonu, tanımlı değilse yerel
+ * pdfjs-dist tabanlı gerçek bir extractor kullanılır (bkz.
+ * src/lib/text-extraction/index.ts) — hiçbir zaman sahte/mock metin üretilmez.
  */
 export interface TextExtractor {
-  extractFromR2Object(key: string): Promise<ExtractedDocument>;
+  extractFromStorageObject(key: string): Promise<ExtractedDocument>;
 }

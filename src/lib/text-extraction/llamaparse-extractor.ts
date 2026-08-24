@@ -1,5 +1,4 @@
-import { GetObjectCommand } from "@aws-sdk/client-s3";
-import { getR2Client, getR2BucketName } from "@/lib/storage/r2-client";
+import { getStorageProvider } from "@/lib/storage";
 import type { ExtractedDocument, TextExtractor } from "./extractor";
 
 const API_BASE = "https://api.cloud.llamaindex.ai/api/v2/parse";
@@ -32,23 +31,12 @@ function sleep(ms: number): Promise<void> {
 export class LlamaParseTextExtractor implements TextExtractor {
   constructor(private readonly apiKey: string) {}
 
-  async extractFromR2Object(key: string): Promise<ExtractedDocument> {
-    const pdfBytes = await this.fetchPdfBytes(key);
+  async extractFromStorageObject(key: string): Promise<ExtractedDocument> {
+    const pdfBytes = await getStorageProvider().getObjectBytes(key);
     const jobId = await this.startParseJob(pdfBytes, key);
     await this.waitForCompletion(jobId);
     const markdown = await this.fetchMarkdown(jobId);
     return { markdown };
-  }
-
-  private async fetchPdfBytes(key: string): Promise<Uint8Array> {
-    const s3 = getR2Client();
-    const response = await s3.send(
-      new GetObjectCommand({ Bucket: getR2BucketName(), Key: key })
-    );
-    if (!response.Body) {
-      throw new Error(`R2 nesnesi bulunamadı: ${key}`);
-    }
-    return response.Body.transformToByteArray();
   }
 
   private async startParseJob(pdfBytes: Uint8Array, key: string): Promise<string> {
