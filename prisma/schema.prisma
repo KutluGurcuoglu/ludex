@@ -1,0 +1,254 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  JUDGE
+  CONTESTANT
+}
+
+enum ApplicationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum ReportStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  EVALUATED
+}
+
+enum OutboxStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  fullName     String
+  role         Role     @default(CONTESTANT)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  sessions            Session[]
+  passwordResetTokens PasswordResetToken[]
+  judgeApplication    JudgeApplication?
+  judgeCategories     JudgeCategory[]
+  reports             Report[]             @relation("ContestantReports")
+  assignedReports     Report[]             @relation("AssignedJudgeReports")
+  judgeEvaluations    JudgeEvaluation[]
+  auditLogs           AuditLog[]
+
+  @@index([email])
+}
+
+model Session {
+  id        String   @id @default(uuid())
+  userId    String
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model PasswordResetToken {
+  id        String   @id @default(uuid())
+  userId    String
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model JudgeApplication {
+  id        String            @id @default(uuid())
+  userId    String            @unique
+  status    ApplicationStatus @default(PENDING)
+  notes     String?
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Category {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  createdAt   DateTime @default(now())
+
+  judgeCategories   JudgeCategory[]
+  categoryDocuments CategoryDocument[]
+  reportTemplates   ReportTemplate[]
+  reports           Report[]
+}
+
+model JudgeCategory {
+  userId     String
+  categoryId String
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([userId, categoryId])
+}
+
+model CategoryDocument {
+  id         String   @id @default(uuid())
+  categoryId String
+  fileName   String
+  fileUrl    String
+  mimeType   String
+  fileSize   Int
+  createdAt  DateTime @default(now())
+
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+}
+
+model ReportTemplate {
+  id          String   @id @default(uuid())
+  categoryId  String
+  title       String
+  description String?
+  createdAt   DateTime @default(now())
+
+  category Category          @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  versions TemplateVersion[]
+  reports  Report[]
+}
+
+model TemplateVersion {
+  id         String   @id @default(uuid())
+  templateId String
+  version    Int
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  template ReportTemplate        @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  sections TemplateSection[]
+  criteria EvaluationCriterion[]
+  reports  Report[]
+}
+
+model TemplateSection {
+  id                String  @id @default(uuid())
+  templateVersionId String
+  title             String
+  order             Int
+  description       String?
+
+  templateVersion TemplateVersion @relation(fields: [templateVersionId], references: [id], onDelete: Cascade)
+}
+
+model EvaluationCriterion {
+  id                String @id @default(uuid())
+  templateVersionId String
+  title             String
+  maxScore          Float
+  weight            Float  @default(1.0)
+
+  templateVersion TemplateVersion  @relation(fields: [templateVersionId], references: [id], onDelete: Cascade)
+  scores          CriterionScore[]
+}
+
+model Report {
+  id                String       @id @default(uuid())
+  title             String
+  contestantId      String
+  categoryId        String
+  templateId        String
+  templateVersionId String
+  assignedJudgeId   String?
+  status            ReportStatus @default(DRAFT)
+  fileName          String
+  fileUrl           String
+  mimeType          String
+  fileSize          Int
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  contestant      User            @relation("ContestantReports", fields: [contestantId], references: [id], onDelete: Cascade)
+  category        Category        @relation(fields: [categoryId], references: [id])
+  template        ReportTemplate  @relation(fields: [templateId], references: [id])
+  templateVersion TemplateVersion @relation(fields: [templateVersionId], references: [id])
+  assignedJudge   User?           @relation("AssignedJudgeReports", fields: [assignedJudgeId], references: [id], onDelete: SetNull)
+
+  aiAnalysis       AIAnalysis?
+  judgeEvaluations JudgeEvaluation[]
+
+  @@index([contestantId])
+  @@index([assignedJudgeId])
+}
+
+model AIAnalysis {
+  id        String   @id @default(uuid())
+  reportId  String   @unique
+  result    Json
+  createdAt DateTime @default(now())
+
+  report Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
+}
+
+model JudgeEvaluation {
+  id         String   @id @default(uuid())
+  reportId   String
+  judgeId    String
+  comment    String?
+  totalScore Float
+  createdAt  DateTime @default(now())
+
+  report Report           @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  judge  User             @relation(fields: [judgeId], references: [id], onDelete: Cascade)
+  scores CriterionScore[]
+
+  @@unique([reportId, judgeId])
+}
+
+model CriterionScore {
+  id           String @id @default(uuid())
+  evaluationId String
+  criterionId  String
+  score        Float
+
+  evaluation JudgeEvaluation     @relation(fields: [evaluationId], references: [id], onDelete: Cascade)
+  criterion  EvaluationCriterion @relation(fields: [criterionId], references: [id], onDelete: Cascade)
+
+  @@unique([evaluationId, criterionId])
+}
+
+model EmailOutbox {
+  id        String       @id @default(uuid())
+  to        String
+  subject   String
+  body      String
+  status    OutboxStatus @default(PENDING)
+  createdAt DateTime     @default(now())
+  sentAt    DateTime?
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String?
+  action    String
+  details   Json?
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+}
