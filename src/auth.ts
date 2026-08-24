@@ -1,7 +1,7 @@
 import NextAuth, { NextAuthOptions, getServerSession } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import { checkRateLimit } from "@/lib/rate-limit";
-import { verifyPassword } from "@/lib/password";
+import { verifyPassword } from "@/lib/hash";
 import { db } from "@/lib/db";
 
 const LOGIN_RATE_LIMIT = 5;
