@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import type { ReportStatus } from "@/types";
 import type { EvaluationOutput } from "@/lib/ai-evaluation/schema";
 import type { EvaluationRecord } from "@/lib/repositories/evaluation-repository";
+import type { ExtractedPage } from "@/lib/text-extraction/extractor";
 
 export interface ReportRecord {
   id: string;
@@ -14,6 +15,8 @@ export interface ReportRecord {
   r2Key: string;
   status: ReportStatus;
   extractedText: string | null;
+  /** extractedText'in sayfa bazlı hali — AI'ya [PAGE n] biçiminde verilir ve dönen pageNumber/exactExcerpt'in doğrulanmasında kullanılır. */
+  extractedPages: ExtractedPage[] | null;
   aiEvaluation: EvaluationOutput | null;
   /** Bir rapora birden fazla hakem atanabilir (bkz. ekip aktarım notları — çoklu hakem/kalibrasyon). */
   assignedJudgeIds: string[];
@@ -75,7 +78,7 @@ export interface ReportRepository {
   listAll(): Promise<ReportRecord[]>;
   listByContestant(contestantId: string): Promise<ReportRecord[]>;
   listByJudge(judgeId: string): Promise<ReportRecord[]>;
-  setExtractedText(id: string, text: string | null): Promise<void>;
+  setExtractedText(id: string, text: string | null, pages?: ExtractedPage[] | null): Promise<void>;
   assignJudge(id: string, judgeId: string): Promise<ReportRecord | null>;
   unassignJudge(id: string, judgeId: string): Promise<ReportRecord | null>;
   setAiEvaluation(id: string, evaluation: EvaluationOutput): Promise<void>;
@@ -115,6 +118,7 @@ function toReportRecord(row: ReportWithRelations): ReportRecord {
     r2Key: row.r2Key,
     status: STATUS_TO_DOMAIN[row.status],
     extractedText: row.extractedText,
+    extractedPages: row.extractedPages ? (row.extractedPages as unknown as ExtractedPage[]) : null,
     aiEvaluation: row.aiAnalysis ? (row.aiAnalysis.result as unknown as EvaluationOutput) : null,
     assignedJudgeIds: row.judgeAssignments.map((a) => a.judgeId),
     assignedAt: row.assignedAt?.toISOString(),
@@ -166,8 +170,14 @@ class PrismaReportRepository implements ReportRepository {
     return rows.map(toReportRecord);
   }
 
-  async setExtractedText(id: string, text: string | null): Promise<void> {
-    await db.report.updateMany({ where: { id }, data: { extractedText: text } });
+  async setExtractedText(id: string, text: string | null, pages?: ExtractedPage[] | null): Promise<void> {
+    await db.report.updateMany({
+      where: { id },
+      data: {
+        extractedText: text,
+        extractedPages: pages ? (pages as unknown as Prisma.InputJsonValue) : Prisma.DbNull,
+      },
+    });
   }
 
   async assignJudge(id: string, judgeId: string): Promise<ReportRecord | null> {

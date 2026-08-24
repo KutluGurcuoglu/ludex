@@ -1,5 +1,19 @@
+export interface ExtractedPage {
+  pageNumber: number;
+  text: string;
+}
+
 export interface ExtractedDocument {
   markdown: string;
+  /**
+   * Sayfa bazlı düz metin. AI'ya sayfa numarası + gerçek alıntı üretebilmesi
+   * için raporun "[PAGE n]" işaretli haliyle verilebilmesini ve dönen
+   * pageNumber/exactExcerpt'in gerçekten o sayfada var olup olmadığının
+   * doğrulanabilmesini sağlar (bkz. src/lib/ai-evaluation/evidence.ts).
+   * En az bir eleman içerir; sayfa ayrımı yapılamıyorsa tüm metin tek bir
+   * sözde sayfa (pageNumber: 1) olarak döner — hiçbir zaman boş kalmaz.
+   */
+  pages: ExtractedPage[];
 }
 
 /**

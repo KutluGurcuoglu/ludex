@@ -2,41 +2,15 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireRole } from "@/lib/auth/require-role";
 import { getReportRepository } from "@/lib/repositories/report-repository";
-import {
-  getCategoryRepository,
-  type CategoryEvaluationCriterion,
-  type CategoryRecord,
-} from "@/lib/repositories/category-repository";
-import {
-  getScoreCriteriaRepository,
-  getEffectiveCriteria,
-} from "@/lib/repositories/score-criteria-repository";
+import { getScoreCriteriaRepository } from "@/lib/repositories/score-criteria-repository";
+import type { CategoryEvaluationCriterion } from "@/lib/repositories/category-repository";
 import { evaluateReport } from "@/lib/ai-evaluation/evaluate";
 import { findSimilarReports } from "@/lib/ai-evaluation/similarity";
-import { deriveTemplateSectionFromStorageKey } from "@/lib/text-extraction/report-template";
+import { attachVerifiedEvidence } from "@/lib/ai-evaluation/postprocess";
+import { computeContextHash } from "@/lib/ai-evaluation/context-hash";
+import { resolveReadiness } from "@/lib/ai-evaluation/readiness";
+import { toPageMarkedContent } from "@/lib/ai-evaluation/report-content";
 import type { ScoreCriterion } from "@/types";
-
-/**
- * Kategorinin templateSections'ı boşsa ama daha önce gerçekten bir Rapor
- * Şablonu PDF'i yüklenmişse (ör. bu şablon, /api/categories/:id/report-template
- * bu türetmeyi eklemeden önce yüklenmiş eski bir kategoriyse), aynı
- * deterministik türetmeyi burada da dener ve kalıcı hale getirir — admin'in
- * şablonu yeniden yüklemesini beklemeye gerek kalmaz.
- */
-async function ensureTemplateSections(category: CategoryRecord): Promise<CategoryRecord> {
-  if (category.templateSections.length > 0 || !category.reportTemplate?.fileUrl) {
-    return category;
-  }
-
-  try {
-    const section = await deriveTemplateSectionFromStorageKey(category.reportTemplate.fileUrl);
-    const updated = await getCategoryRepository().setTemplateSections(category.id, [section]);
-    return updated ?? category;
-  } catch (error) {
-    console.error(`Rapor şablonu otomatik onarım hatası (kategori ${category.id}):`, error);
-    return category;
-  }
-}
 
 /** Hakemin puanladığı efektif kriterleri (kategoriye özel ya da global), AI'nın beklediği şekle çevirir. */
 function toAiCriteria(criteria: ScoreCriterion[]): CategoryEvaluationCriterion[] {
@@ -69,46 +43,55 @@ export async function POST(
     return NextResponse.json({ error: "Bu rapor size atanmamış." }, { status: 403 });
   }
 
-  if (!report.extractedText) {
-    return NextResponse.json(
-      { error: "Rapor metni henüz çıkarılmamış, AI değerlendirmesi başlatılamaz." },
-      { status: 409 }
-    );
-  }
-
-  let category = await getCategoryRepository().findById(report.categoryId);
-  if (!category) {
-    return NextResponse.json({ error: "Rapora ait kategori bulunamadı." }, { status: 404 });
-  }
-
-  // templateSections, admin panelinde ayrıca elle girilmiyor — gerçek kaynak
-  // admin'in zaten yüklediği Rapor Şablonu PDF'idir (bkz. ensureTemplateSections).
-  category = await ensureTemplateSections(category);
-
   // AI kriterleri, hakemin raporu puanlarken kullandığı TAM AYNI kaynaktan
   // gelir (getEffectiveCriteria: kategoriye özel Category.criteria varsa o,
   // yoksa global ScoreCriterion listesi) — ayrı, kullanıcının göremediği bir
-  // evaluationCriteria alanı artık zorunlu değil.
+  // evaluationCriteria alanı artık zorunlu değil. templateSections de admin
+  // panelinde ayrıca elle girilmiyor — gerçek kaynak admin'in zaten yüklediği
+  // Rapor Şablonu PDF'idir. Bu hazırlık kontrolleri /copilot ile tek kaynaktan
+  // (resolveReadiness) paylaşılır — mesajlar iki yerde de aynı kalır.
   const globalCriteria = await getScoreCriteriaRepository().listAll();
-  const effectiveCriteria = getEffectiveCriteria(category, globalCriteria);
+  const readiness = await resolveReadiness(report, globalCriteria);
 
-  if (category.templateSections.length === 0 || effectiveCriteria.length === 0) {
-    return NextResponse.json(
-      {
-        error:
-          "Bu kategori için rapor şablonu ve/veya değerlendirme kriterleri henüz tanımlanmamış. Önce yarışma düzenleme panelinden Rapor Şablonu PDF'i yükleyin ve en az bir değerlendirme kriteri tanımlayın.",
-      },
-      { status: 409 }
-    );
+  if (readiness.status === "missing_text") {
+    return NextResponse.json({ error: readiness.message }, { status: 409 });
   }
+  if (readiness.status === "category_not_found") {
+    return NextResponse.json({ error: readiness.message }, { status: 404 });
+  }
+  if (readiness.status === "missing_template" || readiness.status === "missing_criteria") {
+    return NextResponse.json({ error: readiness.message }, { status: 409 });
+  }
+
+  // Buraya ulaşıldıysa readiness.status "ready_not_started" | "stale" | "fresh"
+  // — /evaluate'in görevi zaten (yeniden) analiz üretmek olduğu için bu üç
+  // durumun hepsinde de değerlendirmeye devam edilir (stale/ready_not_started
+  // yalnızca salt-okunur ekranlar — Copilot, hakem uyarısı — için bir sinyaldir).
+  const { category, effectiveCriteria } = readiness;
 
   try {
     const evaluation = await evaluateReport({
-      reportContent: report.extractedText,
+      reportContent: toPageMarkedContent(report),
       category: category.name,
+      specificationContent: category.specificationText ?? undefined,
       template: { sections: category.templateSections },
       evaluationCriteria: toAiCriteria(effectiveCriteria),
     });
+
+    // Sunucu, AI'nın söylediği pageNumber/exactExcerpt'e körü körüne
+    // güvenmez — her iddiayı raporun gerçek sayfa metnine karşı doğrular ve
+    // doğrulanamayanları sonuçtan çıkarır (bkz. postprocess.ts).
+    const verifiedEvaluation = attachVerifiedEvidence(evaluation, report.extractedPages);
+
+    // criterionId yalnızca bir id'dir (genelde UUID) — UI'nın gösterebileceği
+    // gerçek kriter adı/maxScore'u, hakemin puanlarken kullandığı AYNI
+    // effectiveCriteria listesinden burada damgalanır (LLM üretmez).
+    const criteriaById = new Map(effectiveCriteria.map((c) => [c.id, c]));
+    verifiedEvaluation.criteriaEvaluations = verifiedEvaluation.criteriaEvaluations.map((c) => ({
+      ...c,
+      criterionLabel: criteriaById.get(c.criterionId)?.label,
+      criterionMaxScore: criteriaById.get(c.criterionId)?.maxScore,
+    }));
 
     // Benzerlik LLM tarafından üretilmez — deterministik olarak burada
     // hesaplanır ve aynı AI analiz kaydına (AIAnalysis) eklenir. Yalnızca
@@ -119,13 +102,29 @@ export async function POST(
       (r) => r.categoryId === report.categoryId && Boolean(r.extractedText)
     );
     const similarReports = findSimilarReports(
-      { id: report.id, extractedText: report.extractedText },
-      candidates.map((r) => ({ id: r.id, title: r.title, extractedText: r.extractedText ?? "" }))
+      { id: report.id, extractedText: report.extractedText ?? "", pages: report.extractedPages },
+      candidates.map((r) => ({
+        id: r.id,
+        title: r.title,
+        extractedText: r.extractedText ?? "",
+        pages: r.extractedPages,
+      }))
     );
+
+    // Bu analiz hangi şartname/şablon/kriter kombinasyonuyla üretildi —
+    // admin bunlardan birini değiştirirse GET /api/reports bu hash'i güncel
+    // durumla karşılaştırıp analizi stale olarak işaretler (bkz. context-hash.ts).
+    const contextHash = computeContextHash({
+      specificationText: category.specificationText,
+      templateSections: category.templateSections,
+      criteria: effectiveCriteria,
+    });
+
     const enrichedEvaluation = {
-      ...evaluation,
+      ...verifiedEvaluation,
       similarReports,
       similarityScore: similarReports[0]?.matchPercentage,
+      contextHash,
     };
 
     await reportRepository.setAiEvaluation(report.id, enrichedEvaluation);

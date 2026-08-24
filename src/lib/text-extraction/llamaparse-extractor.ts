@@ -1,5 +1,5 @@
 import { getStorageProvider } from "@/lib/storage";
-import type { ExtractedDocument, TextExtractor } from "./extractor";
+import type { ExtractedDocument, ExtractedPage, TextExtractor } from "./extractor";
 
 const API_BASE = "https://api.cloud.llamaindex.ai/api/v2/parse";
 const POLL_INTERVAL_MS = 3000;
@@ -19,9 +19,18 @@ interface JobStatusResponse {
   job: JobStatus;
 }
 
+interface LlamaParsePage {
+  page?: number;
+  pageNumber?: number;
+  md?: string;
+  text?: string;
+  markdown?: string;
+}
+
 interface MarkdownResultResponse {
   job: JobStatus;
   markdown_full?: string;
+  pages?: LlamaParsePage[];
 }
 
 function sleep(ms: number): Promise<void> {
@@ -35,8 +44,7 @@ export class LlamaParseTextExtractor implements TextExtractor {
     const pdfBytes = await getStorageProvider().getObjectBytes(key);
     const jobId = await this.startParseJob(pdfBytes, key);
     await this.waitForCompletion(jobId);
-    const markdown = await this.fetchMarkdown(jobId);
-    return { markdown };
+    return this.fetchResult(jobId);
   }
 
   private async startParseJob(pdfBytes: Uint8Array, key: string): Promise<string> {
@@ -88,8 +96,15 @@ export class LlamaParseTextExtractor implements TextExtractor {
     throw new Error("LlamaParse işi zaman aşımına uğradı.");
   }
 
-  private async fetchMarkdown(jobId: string): Promise<string> {
-    const response = await fetch(`${API_BASE}/${jobId}?expand=markdown_full`, {
+  /**
+   * Sayfa bazlı sonucu mümkün olduğunca isteriz; LlamaParse'ın bu uçtaki
+   * gerçek yanıt şekli garanti olmadığından `pages` alanını best-effort
+   * normalize ederiz. API hiç sayfa ayrımı döndürmezse (veya şekli
+   * beklenenden farklıysa) tüm belgeyi TEK bir sözde sayfa olarak döneriz —
+   * asla hata fırlatmaz, asla sayfa uydurmaz.
+   */
+  private async fetchResult(jobId: string): Promise<ExtractedDocument> {
+    const response = await fetch(`${API_BASE}/${jobId}?expand=markdown_full,pages`, {
       headers: { Authorization: `Bearer ${this.apiKey}` },
     });
     if (!response.ok) {
@@ -100,6 +115,21 @@ export class LlamaParseTextExtractor implements TextExtractor {
     if (!data.markdown_full) {
       throw new Error("LlamaParse sonucunda markdown_full alanı bulunamadı.");
     }
-    return data.markdown_full;
+    const markdown = data.markdown_full;
+
+    const pages: ExtractedPage[] = [];
+    if (Array.isArray(data.pages)) {
+      for (let i = 0; i < data.pages.length; i++) {
+        const p = data.pages[i];
+        const pageNumber = p.page ?? p.pageNumber ?? i + 1;
+        const text = (p.md ?? p.text ?? p.markdown ?? "").trim();
+        if (text) pages.push({ pageNumber, text });
+      }
+    }
+
+    return {
+      markdown,
+      pages: pages.length > 0 ? pages : [{ pageNumber: 1, text: markdown }],
+    };
   }
 }

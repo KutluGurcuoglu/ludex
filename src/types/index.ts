@@ -146,6 +146,12 @@ export interface Report {
   submittedAt: string;
   /** Yalnızca yarışmacı görünümünde ve sonuç yayınlandıktan sonra dolu gelir. */
   aiFeedback?: AIContestantFeedback | null;
+  /**
+   * Admin şartname/şablon/kriterleri bu AIAnalysis üretildikten SONRA
+   * değiştirdiyse true olur (bkz. src/lib/ai-evaluation/context-hash.ts) —
+   * yalnızca admin/hakem yanıtında bulunur, yarışmacıya asla dönmez.
+   */
+  aiAnalysisStale?: boolean;
 }
 
 export type Severity = "low" | "medium" | "high";
@@ -171,6 +177,14 @@ export interface ComplianceCheckItem {
   passed: boolean;
   detail: string;
   evidenceIds: string[];
+  /**
+   * true ise: bu bulgu bir konuma işaret ediyor olabilir (ör. eksik bir bölüm)
+   * ama sunucu bunu raporun gerçek metninde doğrulayamadı — evidenceIds boş
+   * kalır ve UI "Neden?" linki yerine bunun işaretlenemeyeceğini açıkça belirtir.
+   */
+  unverifiable?: boolean;
+  /** Yalnızca gerçek bir ihlal/uyumsuzluk bulgusu için doldurulur — üç durumlu (✅/⚠/❌) gösterim için. */
+  severity?: Severity;
 }
 
 export interface WritingStyleFlag {
@@ -227,9 +241,12 @@ export interface ContentAnalysis {
   improvementSuggestions: string[];
 }
 
+/** Deterministik shingle karşılaştırmasından gelen, gerçek sayfa+alıntı ile somutlaştırılmış bir paylaşılan pasaj. */
 export interface SimilarityBreakdownItem {
-  sectionLabel: string;
-  matchPercentage: number;
+  targetPage: number;
+  targetExcerpt: string;
+  matchedPage: number;
+  matchedExcerpt: string;
 }
 
 export interface SimilarReportMatch {
@@ -237,6 +254,16 @@ export interface SimilarReportMatch {
   reportLabel: string;
   matchPercentage: number;
   breakdown: SimilarityBreakdownItem[];
+}
+
+/** Bir değerlendirme kriteri için AI'nın ürettiği puan/gerekçe — hakemin kendi puanlamasından bağımsızdır, yalnızca ön bilgi amaçlıdır. */
+export interface CriterionAiEvaluation {
+  id: string;
+  label: string;
+  score: number | null;
+  maxScore?: number;
+  reason: string;
+  evidenceIds: string[];
 }
 
 export interface AIAnalysisResult {
@@ -249,6 +276,7 @@ export interface AIAnalysisResult {
   redFlags: RedFlag[];
   specCompliance: ComplianceCheckItem[];
   templateCompliance: ComplianceCheckItem[];
+  criteriaEvaluations: CriterionAiEvaluation[];
   contentAnalysis: ContentAnalysis;
   /** 0-100. Kategori içi benzerlik karşılaştırması henüz gerçek AI tarafında
    * yapılmıyor (bkz. src/services/ai-analysis.service.ts) — hesaplanmadığında boş kalır. */

@@ -52,7 +52,8 @@ export class LocalPdfTextExtractor implements TextExtractor {
           "PDF'ten hiç metin çıkarılamadı (taranmış görüntü tabanlı bir PDF olabilir)."
         );
       }
-      return { markdown };
+      const pages = pageTexts.map((text, index) => ({ pageNumber: index + 1, text }));
+      return { markdown, pages };
     } finally {
       await doc.destroy();
     }

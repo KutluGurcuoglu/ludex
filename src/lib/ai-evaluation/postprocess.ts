@@ -1,0 +1,64 @@
+import type { EvaluationOutput } from "./schema";
+import type { ExtractedPage } from "@/lib/text-extraction/extractor";
+import { verifyExcerpt } from "./evidence";
+
+export interface Evidence {
+  id: string;
+  page: number;
+  excerpt: string;
+  note?: string;
+}
+
+/**
+ * AI çıktısındaki her pageNumber/exactExcerpt iddiasını raporun gerçek sayfa
+ * metnine karşı doğrular (bkz. evidence.ts). Doğrulanamayan bir alıntı,
+ * persist edilen sonuçtan TAMAMEN çıkarılır (asla saklanmaz) — böylece
+ * DB'de duran her pageNumber/exactExcerpt, garantili olarak gerçektir.
+ * Doğrulanan her alıntı, sabit id'li düz bir `evidences` listesine de
+ * eklenir; bu id'ler UI'daki mevcut jumpToEvidence/highlight mekanizmasının
+ * beklediği `Evidence{id,page,excerpt}` şeklidir.
+ */
+export function attachVerifiedEvidence(
+  evaluation: EvaluationOutput,
+  pages: ExtractedPage[] | null | undefined
+): EvaluationOutput {
+  const evidences: Evidence[] = [];
+
+  const specFindings = evaluation.specificationAnalysis.findings.map((finding, index) => {
+    const verified = verifyExcerpt(pages, finding.pageNumber, finding.exactExcerpt);
+    if (!verified) {
+      return { ...finding, pageNumber: undefined, exactExcerpt: undefined };
+    }
+    const id = `spec-${index}`;
+    evidences.push({ id, page: verified.page, excerpt: verified.excerpt, note: finding.ruleText });
+    return finding;
+  });
+
+  const headingContentAnalysis = evaluation.headingContentAnalysis.map((item) => {
+    const verified = verifyExcerpt(pages, item.pageNumber, item.exactExcerpt);
+    if (!verified) {
+      return { ...item, pageNumber: undefined, exactExcerpt: undefined };
+    }
+    const id = `heading-${item.sectionId}`;
+    evidences.push({ id, page: verified.page, excerpt: verified.excerpt, note: item.notes });
+    return item;
+  });
+
+  const criteriaEvaluations = evaluation.criteriaEvaluations.map((item) => {
+    const verified = verifyExcerpt(pages, item.pageNumber, item.exactExcerpt);
+    if (!verified) {
+      return { ...item, pageNumber: undefined, exactExcerpt: undefined };
+    }
+    const id = `criterion-${item.criterionId}`;
+    evidences.push({ id, page: verified.page, excerpt: verified.excerpt, note: item.evidence });
+    return item;
+  });
+
+  return {
+    ...evaluation,
+    specificationAnalysis: { ...evaluation.specificationAnalysis, findings: specFindings },
+    headingContentAnalysis,
+    criteriaEvaluations,
+    evidences,
+  };
+}
