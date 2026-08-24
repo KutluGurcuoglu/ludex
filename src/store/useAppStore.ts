@@ -6,7 +6,6 @@ import { hashPassword } from "@/lib/hash";
 import type {
   AppNotification,
   Category,
-  CompetitionDocument,
   FaqEntry,
   JudgeEvaluation,
   JudgeWorkStatus,
@@ -156,15 +155,6 @@ function generateMockCriteriaFromSpecification(category: Pick<Category, "id" | "
       description: pick.description,
     };
   });
-}
-
-/** Şartname yüklendiğinde önerilen gönderim penceresi: bugün açılır, 30 gün sonra kapanır. */
-function generateMockSubmissionWindow(): { opensAt: string; closesAt: string } {
-  const now = Date.now();
-  return {
-    opensAt: new Date(now).toISOString(),
-    closesAt: new Date(now + 30 * 24 * 60 * 60 * 1000).toISOString(),
-  };
 }
 
 const SCORE_CRITERIA: ScoreCriterion[] = [
@@ -556,26 +546,10 @@ export interface AppState {
   saveEvaluation: (evaluation: JudgeEvaluation) => void;
   resolveDisqualification: (reportId: string, decision: "upheld" | "dismissed") => void;
   approveEvaluation: (evaluationId: string) => void;
-  setCategoryReleaseDate: (categoryId: string, releaseAt: string | null) => void;
-  releaseCategoryResults: (categoryId: string) => void;
-  setCategoryEvaluationDeadline: (categoryId: string, deadline: string | null) => void;
-  checkScheduledReleases: () => void;
 
   addCategory: (input: { name: string; description?: string }) => Category;
   updateCategory: (id: string, updates: Partial<Pick<Category, "name" | "description">>) => void;
-  setCategorySpecification: (id: string, doc: CompetitionDocument) => void;
-  setCategoryTemplate: (id: string, doc: CompetitionDocument) => void;
   regenerateCategoryCriteria: (categoryId: string) => ScoreCriterion[];
-  addCategoryCriterion: (
-    categoryId: string,
-    input: { label: string; maxScore: number; description?: string },
-  ) => ScoreCriterion;
-  updateCategoryCriterion: (
-    categoryId: string,
-    criterionId: string,
-    updates: Partial<Pick<ScoreCriterion, "label" | "maxScore" | "description">>,
-  ) => void;
-  deleteCategoryCriterion: (categoryId: string, criterionId: string) => void;
   setCategorySubmissionWindow: (
     categoryId: string,
     opensAt: string | null,
@@ -1225,91 +1199,6 @@ export const useAppStore = create<AppState>()(
         });
       },
 
-      setCategoryReleaseDate: (categoryId, releaseAt) => {
-        set((state) => ({
-          categories: state.categories.map((c) =>
-            c.id === categoryId ? { ...c, resultsReleaseAt: releaseAt } : c,
-          ),
-        }));
-      },
-
-      setCategoryEvaluationDeadline: (categoryId, deadline) => {
-        set((state) => ({
-          categories: state.categories.map((c) =>
-            c.id === categoryId ? { ...c, evaluationDeadline: deadline } : c,
-          ),
-        }));
-      },
-
-      releaseCategoryResults: (categoryId) => {
-        set((state) => {
-          const reportIdsInCategory = new Set(
-            state.reports.filter((r) => r.categoryId === categoryId).map((r) => r.id),
-          );
-
-          const toRelease = state.evaluations.filter(
-            (e) =>
-              reportIdsInCategory.has(e.reportId) &&
-              e.status === "submitted" &&
-              !e.visibleToContestant,
-          );
-          if (toRelease.length === 0) return state;
-
-          const evaluations = state.evaluations.map((e) =>
-            toRelease.includes(e) ? { ...e, visibleToContestant: true } : e,
-          );
-
-          const newNotifications = toRelease.flatMap((e) => {
-            const report = state.reports.find((r) => r.id === e.reportId);
-            if (!report) return [];
-            const contestant = state.users.find((u) => u.id === report.contestantId);
-            const judge = state.users.find((u) => u.id === e.judgeId);
-            const result: AppNotification[] = [];
-            if (contestant && contestant.notifyEvaluationUpdates !== false) {
-              result.push(
-                createNotification({
-                  userId: contestant.id,
-                  kind: "evaluation_completed",
-                  title: "Raporun değerlendirildi",
-                  body: `${report.title} · ${e.totalScore} puan`,
-                  link: "/contestant",
-                }),
-              );
-            }
-            if (judge && judge.notifyEvaluationApproved !== false) {
-              result.push(
-                createNotification({
-                  userId: judge.id,
-                  kind: "evaluation_approved",
-                  title: "Değerlendirmen yayınlandı",
-                  body: report.title,
-                  link: "/judge",
-                }),
-              );
-            }
-            return result;
-          });
-
-          return {
-            evaluations,
-            categories: state.categories.map((c) =>
-              c.id === categoryId ? { ...c, resultsReleasedAt: new Date().toISOString() } : c,
-            ),
-            notifications: [...newNotifications, ...state.notifications],
-          };
-        });
-      },
-
-      /** Planlanan yayın tarihi geçmiş kategorileri bulup sonuçlarını yayınlar; bir
-       * ResultsReleaseWatcher tarafından periyodik olarak çağrılır. */
-      checkScheduledReleases: () => {
-        const now = Date.now();
-        const due = get().categories.filter(
-          (c) => c.resultsReleaseAt && new Date(c.resultsReleaseAt).getTime() <= now,
-        );
-        due.forEach((c) => get().releaseCategoryResults(c.id));
-      },
-
       addCategory: ({ name, description }) => {
         const newCategory: Category = {
           id: `cat-${crypto.randomUUID()}`,
@@ -1328,30 +1217,6 @@ export const useAppStore = create<AppState>()(
         }));
       },
 
-      setCategorySpecification: (id, doc) => {
-        set((state) => ({
-          categories: state.categories.map((c) => {
-            if (c.id !== id) return c;
-            const window = generateMockSubmissionWindow();
-            return {
-              ...c,
-              specification: doc,
-              criteria: generateMockCriteriaFromSpecification(c),
-              submissionOpensAt: window.opensAt,
-              submissionClosesAt: window.closesAt,
-            };
-          }),
-        }));
-      },
-
-      setCategoryTemplate: (id, doc) => {
-        set((state) => ({
-          categories: state.categories.map((c) =>
-            c.id === id ? { ...c, reportTemplate: doc } : c,
-          ),
-        }));
-      },
-
       regenerateCategoryCriteria: (categoryId) => {
         const category = get().categories.find((c) => c.id === categoryId);
         if (!category) return [];
@@ -1360,46 +1225,6 @@ export const useAppStore = create<AppState>()(
           categories: state.categories.map((c) => (c.id === categoryId ? { ...c, criteria } : c)),
         }));
         return criteria;
-      },
-
-      addCategoryCriterion: (categoryId, { label, maxScore, description }) => {
-        const newCriterion: ScoreCriterion = {
-          id: `crit-${categoryId}-${crypto.randomUUID()}`,
-          label,
-          maxScore,
-          description,
-        };
-        set((state) => ({
-          categories: state.categories.map((c) =>
-            c.id === categoryId ? { ...c, criteria: [...(c.criteria ?? []), newCriterion] } : c,
-          ),
-        }));
-        return newCriterion;
-      },
-
-      updateCategoryCriterion: (categoryId, criterionId, updates) => {
-        set((state) => ({
-          categories: state.categories.map((c) =>
-            c.id === categoryId
-              ? {
-                  ...c,
-                  criteria: (c.criteria ?? []).map((cr) =>
-                    cr.id === criterionId ? { ...cr, ...updates } : cr,
-                  ),
-                }
-              : c,
-          ),
-        }));
-      },
-
-      deleteCategoryCriterion: (categoryId, criterionId) => {
-        set((state) => ({
-          categories: state.categories.map((c) =>
-            c.id === categoryId
-              ? { ...c, criteria: (c.criteria ?? []).filter((cr) => cr.id !== criterionId) }
-              : c,
-          ),
-        }));
       },
 
       setCategorySubmissionWindow: (categoryId, opensAt, closesAt) => {

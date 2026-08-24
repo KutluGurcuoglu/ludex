@@ -42,7 +42,7 @@ import {
 } from "@/components/ui/dialog";
 import { useAppStore } from "@/store/useAppStore";
 import * as categoriesService from "@/services/categories.service";
-import { refreshCategories } from "@/services/sync";
+import { refreshCategories, refreshEvaluations } from "@/services/sync";
 import type { Category, JudgeApprovalStatus, JudgeWorkStatus, ReportStatus, ScoreCriterion } from "@/types";
 
 function toLocalInputValue(iso: string) {
@@ -279,19 +279,31 @@ function ResultsReleaseSection({ category }: { category: Category }) {
   async function handleSchedule(e: FormEvent) {
     e.preventDefault();
     setSavingSchedule(true);
-    await categoriesService.setCategoryReleaseDate(
-      category.id,
-      releaseAt ? new Date(releaseAt).toISOString() : null,
-    );
-    setSavingSchedule(false);
-    toast.success(releaseAt ? "Yayın tarihi planlandı." : "Planlanan yayın tarihi kaldırıldı.");
+    try {
+      await categoriesService.setCategoryReleaseDate(
+        category.id,
+        releaseAt ? new Date(releaseAt).toISOString() : null,
+      );
+      await refreshCategories();
+      toast.success(releaseAt ? "Yayın tarihi planlandı." : "Planlanan yayın tarihi kaldırıldı.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Planlanamadı.");
+    } finally {
+      setSavingSchedule(false);
+    }
   }
 
   async function handleReleaseNow() {
     setReleasingNow(true);
-    await categoriesService.releaseCategoryResults(category.id);
-    setReleasingNow(false);
-    toast.success("Bu kategorideki onay bekleyen sonuçlar yayınlandı.");
+    try {
+      await categoriesService.releaseCategoryResults(category.id);
+      await Promise.all([refreshCategories(), refreshEvaluations()]);
+      toast.success("Bu kategorideki onay bekleyen sonuçlar yayınlandı.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Yayınlanamadı.");
+    } finally {
+      setReleasingNow(false);
+    }
   }
 
   return (
@@ -356,12 +368,18 @@ function EvaluationDeadlineSection({ category }: { category: Category }) {
   async function handleSave(e: FormEvent) {
     e.preventDefault();
     setSaving(true);
-    await categoriesService.setCategoryEvaluationDeadline(
-      category.id,
-      deadline ? new Date(deadline).toISOString() : null,
-    );
-    setSaving(false);
-    toast.success(deadline ? "Değerlendirme son tarihi belirlendi." : "Son tarih kaldırıldı.");
+    try {
+      await categoriesService.setCategoryEvaluationDeadline(
+        category.id,
+        deadline ? new Date(deadline).toISOString() : null,
+      );
+      await refreshCategories();
+      toast.success(deadline ? "Değerlendirme son tarihi belirlendi." : "Son tarih kaldırıldı.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Kaydedilemedi.");
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -393,9 +411,11 @@ function EvaluationDeadlineSection({ category }: { category: Category }) {
 }
 
 /**
- * Bir kategorinin değerlendirme kriterleri. Şartname yüklendiğinde AI tarafından otomatik
- * oluşturulur (bkz. setCategorySpecification); admin burada elle düzenleyebilir. Kategorinin
- * kendi kriteri yoksa bu bölüm gizlenir — hakemler global varsayılan kriterleri kullanır.
+ * Bir kategorinin değerlendirme kriterleri; admin burada elle ekler/düzenler/siler
+ * (PostgreSQL'de Category.criteria alanında saklanır — getEffectiveCriteria()).
+ * "AI ile Yeniden Oluştur" hâlâ mock'tur (şartname metninden kriter üretimi Problem 4'ün
+ * 6 zorunlu AI maddesi dışında, bilinçli olarak gerçek backend'e bağlanmadı).
+ * Kategorinin kendi kriteri yoksa bu bölüm gizlenir — hakemler global varsayılan kriterleri kullanır.
  */
 function CriteriaSection({ category }: { category: Category }) {
   const criteria = category.criteria ?? [];
@@ -439,29 +459,41 @@ function CriteriaSection({ category }: { category: Category }) {
     if (!label.trim() || !Number.isFinite(score) || score <= 0) return;
 
     setSaving(true);
-    if (editingId) {
-      await categoriesService.updateCategoryCriterion(category.id, editingId, {
-        label: label.trim(),
-        maxScore: score,
-        description: description.trim() || undefined,
-      });
-    } else {
-      await categoriesService.addCategoryCriterion(category.id, {
-        label: label.trim(),
-        maxScore: score,
-        description: description.trim() || undefined,
-      });
+    try {
+      if (editingId) {
+        await categoriesService.updateCategoryCriterion(category.id, editingId, {
+          label: label.trim(),
+          maxScore: score,
+          description: description.trim() || undefined,
+        });
+      } else {
+        await categoriesService.addCategoryCriterion(category.id, {
+          label: label.trim(),
+          maxScore: score,
+          description: description.trim() || undefined,
+        });
+      }
+      await refreshCategories();
+      toast.success(editingId ? "Kriter güncellendi." : "Yeni kriter eklendi.");
+      setDialogOpen(false);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Kaydedilemedi.");
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
-    toast.success(editingId ? "Kriter güncellendi." : "Yeni kriter eklendi.");
-    setDialogOpen(false);
   }
 
   async function handleDelete(criterionId: string) {
     setDeletingId(criterionId);
-    await categoriesService.deleteCategoryCriterion(category.id, criterionId);
-    setDeletingId(null);
-    toast.success("Kriter silindi.");
+    try {
+      await categoriesService.deleteCategoryCriterion(category.id, criterionId);
+      await refreshCategories();
+      toast.success("Kriter silindi.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Silinemedi.");
+    } finally {
+      setDeletingId(null);
+    }
   }
 
   if (criteria.length === 0) {
@@ -469,8 +501,7 @@ function CriteriaSection({ category }: { category: Category }) {
       <div className="space-y-3">
         <Label>Değerlendirme Kriterleri</Label>
         <p className="text-sm text-muted-foreground">
-          Bu kategorinin kendi kriteri yok, hakemler varsayılan kriterleri kullanıyor. Şartname
-          yükleyince AI bu kategoriye özel kriterler önerir.
+          Bu kategorinin kendi kriteri yok, hakemler varsayılan kriterleri kullanıyor.
         </p>
       </div>
     );
@@ -694,28 +725,28 @@ export function CompetitionEditSheet({ competition }: { competition: Category })
 
   async function handleSpecFile(file: File) {
     setUploadingSpec(true);
-    const updated = await categoriesService.uploadCategorySpecification(competition.id, {
-      fileName: file.name,
-      fileUrl: "/mock-docs/specification.pdf",
-      fileSizeBytes: file.size,
-      uploadedAt: new Date().toISOString(),
-    });
-    setUploadingSpec(false);
-    toast.success(
-      `Şartname yüklendi. AI ${updated?.criteria?.length ?? 0} değerlendirme kriteri ve bir gönderim takvimi önerdi.`,
-    );
+    try {
+      await categoriesService.uploadCategorySpecification(competition.id, file);
+      await refreshCategories();
+      toast.success("Şartname yüklendi.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Şartname yüklenemedi.");
+    } finally {
+      setUploadingSpec(false);
+    }
   }
 
   async function handleTemplateFile(file: File) {
     setUploadingTemplate(true);
-    await categoriesService.uploadCategoryTemplate(competition.id, {
-      fileName: file.name,
-      fileUrl: "/mock-docs/template.pdf",
-      fileSizeBytes: file.size,
-      uploadedAt: new Date().toISOString(),
-    });
-    setUploadingTemplate(false);
-    toast.success("Rapor şablonu yüklendi.");
+    try {
+      await categoriesService.uploadCategoryTemplate(competition.id, file);
+      await refreshCategories();
+      toast.success("Rapor şablonu yüklendi.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Rapor şablonu yüklenemedi.");
+    } finally {
+      setUploadingTemplate(false);
+    }
   }
 
   return (
