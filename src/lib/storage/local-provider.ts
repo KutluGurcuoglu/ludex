@@ -1,4 +1,4 @@
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { StorageProvider } from "./provider";
 
@@ -60,5 +60,13 @@ export class LocalStorageProvider implements StorageProvider {
     const filePath = resolveLocalStoragePath(key);
     await mkdir(path.dirname(filePath), { recursive: true });
     await writeFile(filePath, bytes);
+  }
+
+  async deleteObject(key: string): Promise<void> {
+    try {
+      await unlink(resolveLocalStoragePath(key));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
   }
 }

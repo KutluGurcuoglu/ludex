@@ -14,4 +14,6 @@ export interface StorageProvider {
   createViewUrl(key: string): Promise<string>;
   /** Ham dosya baytlarını döner (metin çıkarma gibi sunucu içi işlemler için). */
   getObjectBytes(key: string): Promise<Uint8Array>;
+  /** Nesneyi kalıcı olarak siler (ör. bir kategori dokümanı yenisiyle değiştirildiğinde eskisini temizlemek için). Nesne zaten yoksa sessizce başarılı sayılır. */
+  deleteObject(key: string): Promise<void>;
 }

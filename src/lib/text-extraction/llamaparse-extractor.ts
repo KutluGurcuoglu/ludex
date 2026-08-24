@@ -104,7 +104,7 @@ export class LlamaParseTextExtractor implements TextExtractor {
    * asla hata fırlatmaz, asla sayfa uydurmaz.
    */
   private async fetchResult(jobId: string): Promise<ExtractedDocument> {
-    const response = await fetch(`${API_BASE}/${jobId}?expand=markdown_full,pages`, {
+    const response = await fetch(`${API_BASE}/${jobId}?expand=markdown_full`, {
       headers: { Authorization: `Bearer ${this.apiKey}` },
     });
     if (!response.ok) {

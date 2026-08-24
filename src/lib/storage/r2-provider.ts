@@ -1,4 +1,9 @@
-import { GetObjectCommand, HeadObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
+import {
+  DeleteObjectCommand,
+  GetObjectCommand,
+  HeadObjectCommand,
+  PutObjectCommand,
+} from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { getR2Client, getR2BucketName } from "./r2-client";
 import type { StorageProvider } from "./provider";
@@ -41,5 +46,9 @@ export class R2StorageProvider implements StorageProvider {
       throw new Error(`R2 nesnesi bulunamadı: ${key}`);
     }
     return response.Body.transformToByteArray();
+  }
+
+  async deleteObject(key: string): Promise<void> {
+    await getR2Client().send(new DeleteObjectCommand({ Bucket: getR2BucketName(), Key: key }));
   }
 }

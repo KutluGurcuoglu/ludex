@@ -37,6 +37,12 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
     );
   }
 
+  const existingCategory = await getCategoryRepository().findById(id);
+  if (!existingCategory) {
+    return NextResponse.json({ error: "Kategori bulunamadı." }, { status: 404 });
+  }
+  const previousKey = existingCategory.specification?.fileUrl;
+
   const head = await getStorageProvider().headObject(parsed.data.key);
   if (!head) {
     return NextResponse.json(
@@ -80,6 +86,14 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
   }
 
   const updated = await categoryRepository.setSpecificationText(id, specificationText);
+
+  // Yeni şartname başarıyla kaydedildi; eskisi artık hiçbir yerden referans
+  // edilmiyor, R2/yerel depoda sonsuza dek birikmemesi için silinir.
+  if (previousKey && previousKey !== parsed.data.key) {
+    getStorageProvider()
+      .deleteObject(previousKey)
+      .catch((error) => console.error(`Eski şartname silinemedi (${previousKey}):`, error));
+  }
 
   return NextResponse.json({ success: true, category: updated ?? category });
 }
