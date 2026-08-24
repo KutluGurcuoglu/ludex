@@ -1,7 +1,8 @@
 import NextAuth, { NextAuthOptions, getServerSession } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import { checkRateLimit } from "@/lib/rate-limit";
-import { authenticateUser } from "@/lib/auth/password";
+import { verifyPassword } from "@/lib/password";
+import { db } from "@/lib/db";
 
 const LOGIN_RATE_LIMIT = 5;
 const LOGIN_RATE_WINDOW_MS = 15 * 60 * 1000;
@@ -34,9 +35,17 @@ export const authOptions: NextAuthOptions = {
           return null;
         }
 
-        const user = await authenticateUser(rawCredentials.email, rawCredentials.password);
+        const user = await db.user.findUnique({
+          where: { email: rawCredentials.email },
+        });
 
-        if (!user) {
+        if (!user || !user.passwordHash) {
+          return null;
+        }
+
+        const isValid = await verifyPassword(rawCredentials.password, user.passwordHash);
+
+        if (!isValid) {
           return null;
         }
 
@@ -73,7 +82,6 @@ export const authOptions: NextAuthOptions = {
   },
 };
 
-// Route'larda "import { auth } from '@/auth'" kullanımını desteklemek için:
 export const auth = () => getServerSession(authOptions);
 
 export default NextAuth(authOptions);
