@@ -41,7 +41,12 @@ export async function fetchCloudflareStructuredJson(
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
-      max_tokens: options?.maxTokens ?? 4096,
+      // gpt-oss-20b bir "reasoning" modeli: yanıtlamadan önce dahili muhakeme
+      // (reasoning_content) için de bu bütçeyi kullanır. Gerçek rapor
+      // değerlendirmesi gibi çok alanlı/uzun JSON çıktısı gereken çağrılarda
+      // 4096 genellikle muhakemeye harcanıp asıl içerik hiç üretilmeden
+      // bitiyordu (bkz. E2E'de gözlenen "message.content is missing" hatası).
+      max_tokens: options?.maxTokens ?? 16384,
       temperature: options?.temperature ?? 0.2,
       response_format: {
         type: "json_schema",
