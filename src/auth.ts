@@ -1,4 +1,4 @@
-import NextAuth, { NextAuthOptions } from "next-auth";
+import NextAuth, { NextAuthOptions, getServerSession } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { authenticateUser } from "@/lib/auth/password";
@@ -72,5 +72,8 @@ export const authOptions: NextAuthOptions = {
     strategy: "jwt",
   },
 };
+
+// Route'larda "import { auth } from '@/auth'" kullanımını desteklemek için:
+export const auth = () => getServerSession(authOptions);
 
 export default NextAuth(authOptions);
