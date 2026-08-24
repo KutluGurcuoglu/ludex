@@ -1,3 +1,5 @@
+import { Prisma, ReportStatus as PrismaReportStatus } from "@prisma/client";
+import { db } from "@/lib/db";
 import type { ReportStatus } from "@/types";
 import type { EvaluationOutput } from "@/lib/ai-evaluation/schema";
 import type { EvaluationRecord } from "@/lib/repositories/evaluation-repository";
@@ -64,10 +66,8 @@ export function deriveReportStatus(
 }
 
 /**
- * Rapor kalıcılığı için port. Kullanıcı repository'siyle aynı desen:
- * şu an in-memory, feat/database-foundation'daki Prisma şeması hazır
- * olunca bu arayüzü değiştirmeden Prisma tabanlı bir implementasyonla
- * değiştireceğiz.
+ * Rapor kalıcılığı için port. Prisma/PostgreSQL tabanlı implementasyonu
+ * `src/lib/db.ts`'teki paylaşılan singleton'ı kullanır.
  */
 export interface ReportRepository {
   create(input: CreateReportInput): Promise<ReportRecord>;
@@ -82,96 +82,153 @@ export interface ReportRepository {
   setStatus(id: string, status: ReportStatus): Promise<void>;
 }
 
-class InMemoryReportRepository implements ReportRepository {
-  private reportsById = new Map<string, ReportRecord>();
+const STATUS_TO_DOMAIN: Record<PrismaReportStatus, ReportStatus> = {
+  [PrismaReportStatus.PENDING_ASSIGNMENT]: "pending_assignment",
+  [PrismaReportStatus.ASSIGNED]: "assigned",
+  [PrismaReportStatus.IN_REVIEW]: "in_review",
+  [PrismaReportStatus.COMPLETED]: "completed",
+  [PrismaReportStatus.DISQUALIFIED]: "disqualified",
+};
 
+const STATUS_TO_PRISMA: Record<ReportStatus, PrismaReportStatus> = {
+  pending_assignment: PrismaReportStatus.PENDING_ASSIGNMENT,
+  assigned: PrismaReportStatus.ASSIGNED,
+  in_review: PrismaReportStatus.IN_REVIEW,
+  completed: PrismaReportStatus.COMPLETED,
+  disqualified: PrismaReportStatus.DISQUALIFIED,
+};
+
+const reportInclude = Prisma.validator<Prisma.ReportDefaultArgs>()({
+  include: { judgeAssignments: true, aiAnalysis: true },
+});
+
+type ReportWithRelations = Prisma.ReportGetPayload<typeof reportInclude>;
+
+function toReportRecord(row: ReportWithRelations): ReportRecord {
+  return {
+    id: row.id,
+    title: row.title,
+    contestantId: row.contestantId,
+    categoryId: row.categoryId,
+    fileName: row.fileName,
+    fileSizeBytes: row.fileSize,
+    r2Key: row.r2Key,
+    status: STATUS_TO_DOMAIN[row.status],
+    extractedText: row.extractedText,
+    aiEvaluation: row.aiAnalysis ? (row.aiAnalysis.result as unknown as EvaluationOutput) : null,
+    assignedJudgeIds: row.judgeAssignments.map((a) => a.judgeId),
+    assignedAt: row.assignedAt?.toISOString(),
+    submittedAt: row.submittedAt.toISOString(),
+  };
+}
+
+class PrismaReportRepository implements ReportRepository {
   async create(input: CreateReportInput): Promise<ReportRecord> {
-    const report: ReportRecord = {
-      id: `report-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-      title: input.title,
-      contestantId: input.contestantId,
-      categoryId: input.categoryId,
-      fileName: input.fileName,
-      fileSizeBytes: input.fileSizeBytes,
-      r2Key: input.r2Key,
-      status: "pending_assignment",
-      extractedText: null,
-      aiEvaluation: null,
-      assignedJudgeIds: [],
-      submittedAt: new Date().toISOString(),
-    };
-    this.reportsById.set(report.id, report);
-    return report;
+    const row = await db.report.create({
+      data: {
+        title: input.title,
+        contestantId: input.contestantId,
+        categoryId: input.categoryId,
+        fileName: input.fileName,
+        fileSize: input.fileSizeBytes,
+        r2Key: input.r2Key,
+      },
+      ...reportInclude,
+    });
+    return toReportRecord(row);
   }
 
   async findById(id: string): Promise<ReportRecord | null> {
-    return this.reportsById.get(id) ?? null;
+    const row = await db.report.findUnique({ where: { id }, ...reportInclude });
+    return row ? toReportRecord(row) : null;
   }
 
   async listAll(): Promise<ReportRecord[]> {
-    return Array.from(this.reportsById.values());
+    const rows = await db.report.findMany({ ...reportInclude, orderBy: { submittedAt: "desc" } });
+    return rows.map(toReportRecord);
   }
 
   async listByContestant(contestantId: string): Promise<ReportRecord[]> {
-    return Array.from(this.reportsById.values()).filter(
-      (r) => r.contestantId === contestantId
-    );
+    const rows = await db.report.findMany({
+      where: { contestantId },
+      ...reportInclude,
+      orderBy: { submittedAt: "desc" },
+    });
+    return rows.map(toReportRecord);
   }
 
   async listByJudge(judgeId: string): Promise<ReportRecord[]> {
-    return Array.from(this.reportsById.values()).filter((r) =>
-      r.assignedJudgeIds.includes(judgeId)
-    );
+    const rows = await db.report.findMany({
+      where: { judgeAssignments: { some: { judgeId } } },
+      ...reportInclude,
+      orderBy: { submittedAt: "desc" },
+    });
+    return rows.map(toReportRecord);
   }
 
   async setExtractedText(id: string, text: string | null): Promise<void> {
-    const report = this.reportsById.get(id);
-    if (report) report.extractedText = text;
+    await db.report.updateMany({ where: { id }, data: { extractedText: text } });
   }
 
   async assignJudge(id: string, judgeId: string): Promise<ReportRecord | null> {
-    const report = this.reportsById.get(id);
+    const report = await db.report.findUnique({ where: { id } });
     if (!report) return null;
 
-    if (!report.assignedJudgeIds.includes(judgeId)) {
-      report.assignedJudgeIds.push(judgeId);
-    }
-    report.assignedAt = new Date().toISOString();
-    if (report.status === "pending_assignment") {
-      report.status = "assigned";
-    }
-    return report;
+    await db.reportJudgeAssignment.upsert({
+      where: { reportId_judgeId: { reportId: id, judgeId } },
+      update: {},
+      create: { reportId: id, judgeId },
+    });
+
+    const updated = await db.report.update({
+      where: { id },
+      data: {
+        assignedAt: new Date(),
+        ...(report.status === PrismaReportStatus.PENDING_ASSIGNMENT
+          ? { status: PrismaReportStatus.ASSIGNED }
+          : {}),
+      },
+      ...reportInclude,
+    });
+    return toReportRecord(updated);
   }
 
   async unassignJudge(id: string, judgeId: string): Promise<ReportRecord | null> {
-    const report = this.reportsById.get(id);
+    const report = await db.report.findUnique({ where: { id } });
     if (!report) return null;
 
-    report.assignedJudgeIds = report.assignedJudgeIds.filter((j) => j !== judgeId);
-    if (report.assignedJudgeIds.length === 0 && report.status === "assigned") {
-      report.status = "pending_assignment";
-    }
-    return report;
+    await db.reportJudgeAssignment.deleteMany({ where: { reportId: id, judgeId } });
+    const remaining = await db.reportJudgeAssignment.count({ where: { reportId: id } });
+
+    const updated = await db.report.update({
+      where: { id },
+      data:
+        remaining === 0 && report.status === PrismaReportStatus.ASSIGNED
+          ? { status: PrismaReportStatus.PENDING_ASSIGNMENT }
+          : {},
+      ...reportInclude,
+    });
+    return toReportRecord(updated);
   }
 
   async setAiEvaluation(id: string, evaluation: EvaluationOutput): Promise<void> {
-    const report = this.reportsById.get(id);
-    if (report) report.aiEvaluation = evaluation;
+    await db.aIAnalysis.upsert({
+      where: { reportId: id },
+      update: { result: evaluation },
+      create: { reportId: id, result: evaluation },
+    });
   }
 
   async setStatus(id: string, status: ReportStatus): Promise<void> {
-    const report = this.reportsById.get(id);
-    if (report) report.status = status;
+    await db.report.updateMany({ where: { id }, data: { status: STATUS_TO_PRISMA[status] } });
   }
 }
 
-const globalForReportRepo = globalThis as unknown as {
-  __reportRepository?: ReportRepository;
-};
+let reportRepository: ReportRepository | undefined;
 
 export function getReportRepository(): ReportRepository {
-  if (!globalForReportRepo.__reportRepository) {
-    globalForReportRepo.__reportRepository = new InMemoryReportRepository();
+  if (!reportRepository) {
+    reportRepository = new PrismaReportRepository();
   }
-  return globalForReportRepo.__reportRepository;
+  return reportRepository;
 }

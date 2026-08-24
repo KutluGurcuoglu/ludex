@@ -1,3 +1,5 @@
+import type { ScoreCriterion as PrismaScoreCriterion } from "@prisma/client";
+import { db } from "@/lib/db";
 import type { Category, ScoreCriterion } from "@/types";
 
 /**
@@ -26,7 +28,10 @@ export interface UpdateScoreCriterionInput {
   description?: string;
 }
 
-/** Diğer repository'lerle aynı desen — şu an in-memory, ileride Prisma'ya taşınacak. */
+/**
+ * Kalıcılık portu. Prisma/PostgreSQL tabanlı implementasyonu `src/lib/db.ts`'teki
+ * paylaşılan singleton'ı kullanır.
+ */
 export interface ScoreCriteriaRepository {
   listAll(): Promise<ScoreCriterion[]>;
   findById(id: string): Promise<ScoreCriterion | null>;
@@ -35,85 +40,67 @@ export interface ScoreCriteriaRepository {
   delete(id: string): Promise<boolean>;
 }
 
-function buildSeedCriteria(): ScoreCriterion[] {
-  return [
-    {
-      id: "crit-content",
-      label: "İçerik ve Özgünlük",
-      maxScore: 30,
-      description: "Projenin özgünlüğü ve içerik derinliği",
-    },
-    {
-      id: "crit-technical",
-      label: "Teknik Yeterlilik",
-      maxScore: 30,
-      description: "Uygulanan yöntemin teknik sağlamlığı",
-    },
-    {
-      id: "crit-compliance",
-      label: "Şartnameye Uygunluk",
-      maxScore: 20,
-      description: "Yarışma şartnamesine uyum",
-    },
-    {
-      id: "crit-presentation",
-      label: "Sunum ve Raporlama Kalitesi",
-      maxScore: 20,
-      description: "Raporun anlaşılırlığı ve sunumu",
-    },
-  ];
+function toScoreCriterion(row: PrismaScoreCriterion): ScoreCriterion {
+  return {
+    id: row.id,
+    label: row.label,
+    maxScore: row.maxScore,
+    description: row.description ?? undefined,
+  };
 }
 
-class InMemoryScoreCriteriaRepository implements ScoreCriteriaRepository {
-  private criteriaById = new Map<string, ScoreCriterion>();
-
-  constructor(seedCriteria: ScoreCriterion[]) {
-    for (const criterion of seedCriteria) {
-      this.criteriaById.set(criterion.id, criterion);
-    }
-  }
-
+class PrismaScoreCriteriaRepository implements ScoreCriteriaRepository {
   async listAll(): Promise<ScoreCriterion[]> {
-    return Array.from(this.criteriaById.values());
+    const rows = await db.scoreCriterion.findMany({ orderBy: { createdAt: "asc" } });
+    return rows.map(toScoreCriterion);
   }
 
   async findById(id: string): Promise<ScoreCriterion | null> {
-    return this.criteriaById.get(id) ?? null;
+    const row = await db.scoreCriterion.findUnique({ where: { id } });
+    return row ? toScoreCriterion(row) : null;
   }
 
   async create(input: CreateScoreCriterionInput): Promise<ScoreCriterion> {
-    const criterion: ScoreCriterion = {
-      id: `crit-${Date.now()}`,
-      label: input.label,
-      maxScore: input.maxScore,
-      description: input.description,
-    };
-    this.criteriaById.set(criterion.id, criterion);
-    return criterion;
+    const row = await db.scoreCriterion.create({
+      data: {
+        label: input.label,
+        maxScore: input.maxScore,
+        description: input.description,
+      },
+    });
+    return toScoreCriterion(row);
   }
 
   async update(id: string, input: UpdateScoreCriterionInput): Promise<ScoreCriterion | null> {
-    const criterion = this.criteriaById.get(id);
-    if (!criterion) return null;
-    const updated = { ...criterion, ...input };
-    this.criteriaById.set(id, updated);
-    return updated;
+    const exists = await db.scoreCriterion.findUnique({ where: { id }, select: { id: true } });
+    if (!exists) return null;
+
+    const row = await db.scoreCriterion.update({
+      where: { id },
+      data: {
+        ...(input.label !== undefined ? { label: input.label } : {}),
+        ...(input.maxScore !== undefined ? { maxScore: input.maxScore } : {}),
+        ...(input.description !== undefined ? { description: input.description } : {}),
+      },
+    });
+    return toScoreCriterion(row);
   }
 
   async delete(id: string): Promise<boolean> {
-    return this.criteriaById.delete(id);
+    try {
+      await db.scoreCriterion.delete({ where: { id } });
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
 
-const globalForCriteriaRepo = globalThis as unknown as {
-  __scoreCriteriaRepository?: ScoreCriteriaRepository;
-};
+let scoreCriteriaRepository: ScoreCriteriaRepository | undefined;
 
 export function getScoreCriteriaRepository(): ScoreCriteriaRepository {
-  if (!globalForCriteriaRepo.__scoreCriteriaRepository) {
-    globalForCriteriaRepo.__scoreCriteriaRepository = new InMemoryScoreCriteriaRepository(
-      buildSeedCriteria()
-    );
+  if (!scoreCriteriaRepository) {
+    scoreCriteriaRepository = new PrismaScoreCriteriaRepository();
   }
-  return globalForCriteriaRepo.__scoreCriteriaRepository;
+  return scoreCriteriaRepository;
 }

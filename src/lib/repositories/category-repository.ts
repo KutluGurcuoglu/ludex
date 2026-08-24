@@ -1,3 +1,5 @@
+import { Prisma, type Category as PrismaCategory } from "@prisma/client";
+import { db } from "@/lib/db";
 import type { Category, CompetitionDocument } from "@/types";
 
 function slugify(name: string): string {
@@ -72,10 +74,8 @@ export interface UpdateCategoryInput {
 }
 
 /**
- * Kategori kalıcılığı için port. Diğer repository'lerle aynı desen:
- * şu an in-memory, feat/database-foundation'daki Prisma şeması hazır
- * olunca bu arayüzü değiştirmeden Prisma tabanlı bir implementasyonla
- * değiştireceğiz.
+ * Kategori kalıcılığı için port. Prisma/PostgreSQL tabanlı implementasyonu
+ * `src/lib/db.ts`'teki paylaşılan singleton'ı kullanır.
  */
 export interface CategoryRepository {
   listAll(): Promise<CategoryRecord[]>;
@@ -98,160 +98,144 @@ export interface CategoryRepository {
   ): Promise<CategoryRecord | null>;
 }
 
-function buildSeedCategories(): CategoryRecord[] {
-  const base = [
-    {
-      id: "cat-yz",
-      name: "Yapay Zeka",
-      slug: "yapay-zeka",
-      createdAt: "2026-05-01T09:00:00.000Z",
-    },
-    {
-      id: "cat-insansiz",
-      name: "İnsansız Sistemler",
-      slug: "insansiz-sistemler",
-      createdAt: "2026-05-01T09:00:00.000Z",
-    },
-    {
-      id: "cat-siber",
-      name: "Siber Güvenlik",
-      slug: "siber-guvenlik",
-      createdAt: "2026-05-01T09:00:00.000Z",
-    },
-  ];
-
-  return base.map((category) => ({
-    ...category,
-    templateSections: [],
-    evaluationCriteria: [],
-  }));
+function toCategoryRecord(row: PrismaCategory): CategoryRecord {
+  return {
+    id: row.id,
+    name: row.name,
+    slug: row.slug,
+    description: row.description ?? undefined,
+    specification: (row.specification as CompetitionDocument | null) ?? undefined,
+    reportTemplate: (row.reportTemplate as CompetitionDocument | null) ?? undefined,
+    createdAt: row.createdAt.toISOString(),
+    submissionOpensAt: row.submissionOpensAt?.toISOString() ?? null,
+    submissionClosesAt: row.submissionClosesAt?.toISOString() ?? null,
+    templateSections: row.templateSections as unknown as CategoryTemplateSection[],
+    evaluationCriteria: row.evaluationCriteria as unknown as CategoryEvaluationCriterion[],
+  };
 }
 
-class InMemoryCategoryRepository implements CategoryRepository {
-  private categoriesById = new Map<string, CategoryRecord>();
-
-  constructor(seedCategories: CategoryRecord[]) {
-    for (const category of seedCategories) {
-      this.categoriesById.set(category.id, category);
-    }
-  }
-
+class PrismaCategoryRepository implements CategoryRepository {
   async listAll(): Promise<CategoryRecord[]> {
-    return Array.from(this.categoriesById.values());
+    const rows = await db.category.findMany();
+    return rows.map(toCategoryRecord);
   }
 
   async findById(id: string): Promise<CategoryRecord | null> {
-    return this.categoriesById.get(id) ?? null;
+    const row = await db.category.findUnique({ where: { id } });
+    return row ? toCategoryRecord(row) : null;
   }
 
   async create(input: CreateCategoryInput): Promise<CategoryRecord> {
-    const category: CategoryRecord = {
-      id: `cat-${Date.now()}`,
-      name: input.name,
-      slug: slugify(input.name),
-      description: input.description,
-      createdAt: new Date().toISOString(),
-      templateSections: [],
-      evaluationCriteria: [],
-    };
-    this.categoriesById.set(category.id, category);
-    return category;
+    const row = await db.category.create({
+      data: {
+        name: input.name,
+        slug: slugify(input.name),
+        description: input.description,
+      },
+    });
+    return toCategoryRecord(row);
   }
 
   async update(id: string, input: UpdateCategoryInput): Promise<CategoryRecord | null> {
-    const category = this.categoriesById.get(id);
-    if (!category) return null;
+    const exists = await db.category.findUnique({ where: { id }, select: { id: true } });
+    if (!exists) return null;
 
-    const updated: CategoryRecord = {
-      ...category,
-      ...(input.name !== undefined ? { name: input.name, slug: slugify(input.name) } : {}),
-      ...(input.description !== undefined ? { description: input.description } : {}),
-    };
-    this.categoriesById.set(id, updated);
-    return updated;
+    const row = await db.category.update({
+      where: { id },
+      data: {
+        ...(input.name !== undefined ? { name: input.name, slug: slugify(input.name) } : {}),
+        ...(input.description !== undefined ? { description: input.description } : {}),
+      },
+    });
+    return toCategoryRecord(row);
   }
 
   async setSpecification(id: string, doc: CompetitionDocument): Promise<CategoryRecord | null> {
-    const category = this.categoriesById.get(id);
-    if (!category) return null;
-    const updated = { ...category, specification: doc };
-    this.categoriesById.set(id, updated);
-    return updated;
+    const exists = await db.category.findUnique({ where: { id }, select: { id: true } });
+    if (!exists) return null;
+
+    const row = await db.category.update({
+      where: { id },
+      data: { specification: doc as unknown as Prisma.InputJsonValue },
+    });
+    return toCategoryRecord(row);
   }
 
   async setReportTemplate(id: string, doc: CompetitionDocument): Promise<CategoryRecord | null> {
-    const category = this.categoriesById.get(id);
-    if (!category) return null;
-    const updated = { ...category, reportTemplate: doc };
-    this.categoriesById.set(id, updated);
-    return updated;
+    const exists = await db.category.findUnique({ where: { id }, select: { id: true } });
+    if (!exists) return null;
+
+    const row = await db.category.update({
+      where: { id },
+      data: { reportTemplate: doc as unknown as Prisma.InputJsonValue },
+    });
+    return toCategoryRecord(row);
   }
 
   async setTemplateSections(
     id: string,
     sections: Array<{ title: string; expectedContent: string }>
   ): Promise<CategoryRecord | null> {
-    const category = this.categoriesById.get(id);
+    const category = await db.category.findUnique({ where: { id }, select: { slug: true } });
     if (!category) return null;
 
-    const updated: CategoryRecord = {
-      ...category,
-      templateSections: sections.map((section, index) => ({
-        id: `${category.slug}-section-${index + 1}`,
-        title: section.title,
-        expectedContent: section.expectedContent,
-      })),
-    };
-    this.categoriesById.set(id, updated);
-    return updated;
+    const templateSections: CategoryTemplateSection[] = sections.map((section, index) => ({
+      id: `${category.slug}-section-${index + 1}`,
+      title: section.title,
+      expectedContent: section.expectedContent,
+    }));
+
+    const row = await db.category.update({
+      where: { id },
+      data: { templateSections: templateSections as unknown as Prisma.InputJsonValue },
+    });
+    return toCategoryRecord(row);
   }
 
   async setEvaluationCriteria(
     id: string,
     criteria: Array<{ name: string; description: string; maxScore?: number }>
   ): Promise<CategoryRecord | null> {
-    const category = this.categoriesById.get(id);
+    const category = await db.category.findUnique({ where: { id }, select: { slug: true } });
     if (!category) return null;
 
-    const updated: CategoryRecord = {
-      ...category,
-      evaluationCriteria: criteria.map((criterion, index) => ({
-        id: `${category.slug}-criterion-${index + 1}`,
-        name: criterion.name,
-        description: criterion.description,
-        maxScore: criterion.maxScore,
-      })),
-    };
-    this.categoriesById.set(id, updated);
-    return updated;
+    const evaluationCriteria: CategoryEvaluationCriterion[] = criteria.map((criterion, index) => ({
+      id: `${category.slug}-criterion-${index + 1}`,
+      name: criterion.name,
+      description: criterion.description,
+      maxScore: criterion.maxScore,
+    }));
+
+    const row = await db.category.update({
+      where: { id },
+      data: { evaluationCriteria: evaluationCriteria as unknown as Prisma.InputJsonValue },
+    });
+    return toCategoryRecord(row);
   }
 
   async setSubmissionWindow(
     id: string,
     window: { opensAt: string | null; closesAt: string | null }
   ): Promise<CategoryRecord | null> {
-    const category = this.categoriesById.get(id);
-    if (!category) return null;
+    const exists = await db.category.findUnique({ where: { id }, select: { id: true } });
+    if (!exists) return null;
 
-    const updated: CategoryRecord = {
-      ...category,
-      submissionOpensAt: window.opensAt,
-      submissionClosesAt: window.closesAt,
-    };
-    this.categoriesById.set(id, updated);
-    return updated;
+    const row = await db.category.update({
+      where: { id },
+      data: {
+        submissionOpensAt: window.opensAt ? new Date(window.opensAt) : null,
+        submissionClosesAt: window.closesAt ? new Date(window.closesAt) : null,
+      },
+    });
+    return toCategoryRecord(row);
   }
 }
 
-const globalForCategoryRepo = globalThis as unknown as {
-  __categoryRepository?: CategoryRepository;
-};
+let categoryRepository: CategoryRepository | undefined;
 
 export function getCategoryRepository(): CategoryRepository {
-  if (!globalForCategoryRepo.__categoryRepository) {
-    globalForCategoryRepo.__categoryRepository = new InMemoryCategoryRepository(
-      buildSeedCategories()
-    );
+  if (!categoryRepository) {
+    categoryRepository = new PrismaCategoryRepository();
   }
-  return globalForCategoryRepo.__categoryRepository;
+  return categoryRepository;
 }
