@@ -100,6 +100,7 @@ export interface CategoryRepository {
     id: string,
     window: { opensAt: string | null; closesAt: string | null }
   ): Promise<CategoryRecord | null>;
+  setCriteria(id: string, criteria: ScoreCriterion[]): Promise<CategoryRecord | null>;
   addCriterion(
     id: string,
     input: { label: string; maxScore: number; description?: string }
@@ -259,6 +260,17 @@ class PrismaCategoryRepository implements CategoryRepository {
         submissionOpensAt: window.opensAt ? new Date(window.opensAt) : null,
         submissionClosesAt: window.closesAt ? new Date(window.closesAt) : null,
       },
+    });
+    return toCategoryRecord(row);
+  }
+
+  async setCriteria(id: string, criteria: ScoreCriterion[]): Promise<CategoryRecord | null> {
+    const exists = await db.category.findUnique({ where: { id }, select: { id: true } });
+    if (!exists) return null;
+
+    const row = await db.category.update({
+      where: { id },
+      data: { criteria: criteria as unknown as Prisma.InputJsonValue },
     });
     return toCategoryRecord(row);
   }

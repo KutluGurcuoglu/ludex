@@ -127,8 +127,11 @@ export async function setCategoryEvaluationDeadline(
  * kapsamındaki 6 zorunlu AI MVP maddesinin dışında, yeni bir AI özelliği
  * gerektirir; bilinçli olarak dokunulmadı (bkz. proje notları).
  */
-export function regenerateCategoryCriteria(id: string): Promise<ScoreCriterion[]> {
-  return Promise.resolve(useAppStore.getState().regenerateCategoryCriteria(id));
+export async function regenerateCategoryCriteria(id: string): Promise<ScoreCriterion[]> {
+  const res = await fetch(`/api/categories/${id}/regenerate-criteria`, { method: "PUT" });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error ?? "Kriterler yeniden oluşturulamadı.");
+  return data.category.criteria;
 }
 
 export async function addCategoryCriterion(

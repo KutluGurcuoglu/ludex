@@ -413,8 +413,11 @@ function EvaluationDeadlineSection({ category }: { category: Category }) {
 /**
  * Bir kategorinin değerlendirme kriterleri; admin burada elle ekler/düzenler/siler
  * (PostgreSQL'de Category.criteria alanında saklanır — getEffectiveCriteria()).
- * "AI ile Yeniden Oluştur" hâlâ mock'tur (şartname metninden kriter üretimi Problem 4'ün
- * 6 zorunlu AI maddesi dışında, bilinçli olarak gerçek backend'e bağlanmadı).
+ * "AI ile Yeniden Oluştur" gerçek backend'e bağlıdır ve kalıcıdır (bkz.
+ * /api/categories/:id/regenerate-criteria), ama henüz gerçek bir AI model
+ * çağrısı değil — kategori kimliğinden deterministik olarak türetilir (bkz.
+ * lib/category-criteria-generator.ts); şartname metnini gerçekten
+ * yorumlayan bir sürüm AI ekibiyle koordinasyon gerektiren ayrı bir iş.
  * Kategorinin kendi kriteri yoksa bu bölüm gizlenir — hakemler global varsayılan kriterleri kullanır.
  */
 function CriteriaSection({ category }: { category: Category }) {
@@ -432,9 +435,15 @@ function CriteriaSection({ category }: { category: Category }) {
 
   async function handleRegenerate() {
     setRegenerating(true);
-    const next = await categoriesService.regenerateCategoryCriteria(category.id);
-    setRegenerating(false);
-    toast.success(`AI ${next.length} kriteri yeniden oluşturdu.`);
+    try {
+      const next = await categoriesService.regenerateCategoryCriteria(category.id);
+      await refreshCategories();
+      toast.success(`AI ${next.length} kriteri yeniden oluşturdu.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Kriterler yeniden oluşturulamadı.");
+    } finally {
+      setRegenerating(false);
+    }
   }
 
   function openCreate() {
@@ -503,6 +512,26 @@ function CriteriaSection({ category }: { category: Category }) {
         <p className="text-sm text-muted-foreground">
           Bu kategorinin kendi kriteri yok, hakemler varsayılan kriterleri kullanıyor.
         </p>
+        <div className="flex gap-2">
+          <Button size="sm" variant="outline" className="flex-1 gap-1.5" onClick={openCreate}>
+            <Plus className="size-3.5" />
+            Kriter Ekle
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={regenerating}
+            className="flex-1 gap-1.5"
+            onClick={handleRegenerate}
+          >
+            {regenerating ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <Sparkles className="size-3.5" />
+            )}
+            AI ile Yeniden Oluştur
+          </Button>
+        </div>
       </div>
     );
   }
