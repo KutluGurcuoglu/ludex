@@ -10,6 +10,22 @@ export interface Evidence {
 }
 
 /**
+ * Modele "HTML/Markdown" gibi bir biçimlendirme dili adını yalnızca gerçekten
+ * geçiyorsa kullanması söylenir (bkz. prompts.ts), ama bu bir prompt talimatı
+ * olduğu için garanti değildir — model yine de alışkanlıkla bu ifadeye
+ * dönebilir. Bu, o talimatın kod tarafındaki kesin garantisidir: rapor
+ * metninin çıkarılma biçimi (LlamaParse çıktısı zaten markdown'dur) hiçbir
+ * zaman yarışmacının kendi kararı değildir, bu yüzden serbest metin
+ * bulgularında "HTML"/"Markdown" adı geçen HER ifade, doğru olsa bile
+ * yanıltıcıdır — koşulsuz olarak filtrelenir.
+ */
+const MARKUP_TECHNOLOGY_MENTION = /\b(html|markdown)\b/i;
+
+function stripMarkupTechnologyMentions(items: string[]): string[] {
+  return items.filter((item) => !MARKUP_TECHNOLOGY_MENTION.test(item));
+}
+
+/**
  * AI çıktısındaki her pageNumber/exactExcerpt iddiasını raporun gerçek sayfa
  * metnine karşı doğrular (bkz. evidence.ts). Doğrulanamayan bir alıntı,
  * persist edilen sonuçtan TAMAMEN çıkarılır (asla saklanmaz) — böylece
@@ -59,6 +75,9 @@ export function attachVerifiedEvidence(
     specificationAnalysis: { ...evaluation.specificationAnalysis, findings: specFindings },
     headingContentAnalysis,
     criteriaEvaluations,
+    strengths: stripMarkupTechnologyMentions(evaluation.strengths),
+    areasForImprovement: stripMarkupTechnologyMentions(evaluation.areasForImprovement),
+    recommendations: stripMarkupTechnologyMentions(evaluation.recommendations),
     evidences,
   };
 }

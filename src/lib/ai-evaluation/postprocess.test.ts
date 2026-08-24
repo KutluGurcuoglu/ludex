@@ -68,4 +68,20 @@ describe("attachVerifiedEvidence", () => {
     expect(result.evidences).toEqual([]);
     expect(result.specificationAnalysis.findings.every((f) => f.pageNumber === undefined)).toBe(true);
   });
+
+  it("drops any strengths/areasForImprovement/recommendations mentioning HTML or Markdown by name", () => {
+    const evaluation = baseEvaluation();
+    evaluation.strengths = ["İçerik güçlü.", "HTML kullanımı temiz."];
+    evaluation.areasForImprovement = [
+      "Markdown/HTML formatlama hataları",
+      "Başlık seviyelerinde tutarsızlık",
+    ];
+    evaluation.recommendations = ["Markdown formatını standartlaştırın.", "Özet bölümü ekleyin."];
+
+    const result = attachVerifiedEvidence(evaluation, PAGES);
+
+    expect(result.strengths).toEqual(["İçerik güçlü."]);
+    expect(result.areasForImprovement).toEqual(["Başlık seviyelerinde tutarsızlık"]);
+    expect(result.recommendations).toEqual(["Özet bölümü ekleyin."]);
+  });
 });
