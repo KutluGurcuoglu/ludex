@@ -60,6 +60,16 @@ export async function GET(_req: Request, { params }: { params: Promise<{ key: st
   const guard = ensureLocalStorageActive();
   if (guard) return guard;
 
+  // R2'nin eşdeğeri (presigned GET URL) yalnızca zaten yetki kontrolünden geçmiş
+  // bir istekçiye üretilir — bu yerel-geliştirme uçu da en azından geçerli bir
+  // oturum ister; aksi halde anahtarı bilen/tahmin eden herkes (yarışmacı
+  // raporları, şartname/şablon dokümanları dahil) hiçbir kimlik doğrulaması
+  // olmadan dosyayı indirebilirdi.
+  const session = await auth();
+  if (!session?.user) {
+    return NextResponse.json({ error: "Yetkisiz erişim." }, { status: 401 });
+  }
+
   const { key: keyParts } = await params;
   const key = keyFromParams(keyParts);
 
