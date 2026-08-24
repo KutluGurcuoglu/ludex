@@ -1,9 +1,7 @@
 import { NextResponse } from "next/server";
-import { GetObjectCommand, HeadObjectCommand } from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { z } from "zod";
 import { auth } from "@/auth";
-import { getR2Client, getR2BucketName } from "@/lib/storage/r2-client";
+import { getStorageProvider } from "@/lib/storage";
 import { getReportRepository, type ReportRecord } from "@/lib/repositories/report-repository";
 import { getCategoryRepository, isSubmissionWindowOpen } from "@/lib/repositories/category-repository";
 import { getUserRepository } from "@/lib/repositories/user-repository";
@@ -18,8 +16,6 @@ import type { AIContestantFeedback } from "@/types";
 // — production'a geçmeden önce bu adımın arka plana (kuyruk / webhook) taşınması
 // gerekir; şimdilik hackathon kapsamında senkron kabul ediyoruz.
 export const maxDuration = 60;
-
-const PDF_VIEW_URL_EXPIRY_SECONDS = 60 * 60; // 1 saat — hakem/yarışmacı raporu incelerken yeterli
 
 const createReportSchema = z.object({
   title: z.string().trim().min(1).max(300),
@@ -46,11 +42,7 @@ async function toApiReport(
 ) {
   const [contestant, pdfUrl] = await Promise.all([
     getUserRepository().findById(report.contestantId),
-    getSignedUrl(
-      getR2Client(),
-      new GetObjectCommand({ Bucket: getR2BucketName(), Key: report.r2Key }),
-      { expiresIn: PDF_VIEW_URL_EXPIRY_SECONDS }
-    ),
+    getStorageProvider().createViewUrl(report.r2Key),
   ]);
 
   const base = {
@@ -109,24 +101,16 @@ export async function POST(req: Request) {
     );
   }
 
-  // Rapor kaydı yalnızca dosya gerçekten R2'ye yüklenmişse oluşturulur —
-  // aksi halde arka planda hiç PDF'i olmayan "hayalet" raporlar birikir.
-  let fileSizeBytes: number;
-  try {
-    const head = await getR2Client().send(
-      new HeadObjectCommand({ Bucket: getR2BucketName(), Key: r2Key })
-    );
-    if (!head.ContentLength) {
-      throw new Error("ContentLength eksik.");
-    }
-    fileSizeBytes = head.ContentLength;
-  } catch (error) {
-    console.error("R2 nesne doğrulama hatası:", error);
+  // Rapor kaydı yalnızca dosya gerçekten yüklenmişse oluşturulur — aksi
+  // halde arka planda hiç PDF'i olmayan "hayalet" raporlar birikir.
+  const head = await getStorageProvider().headObject(r2Key);
+  if (!head) {
     return NextResponse.json(
-      { error: "Belirtilen dosya R2'de bulunamadı. Önce yükleme tamamlanmalı." },
+      { error: "Belirtilen dosya depoda bulunamadı. Önce yükleme tamamlanmalı." },
       { status: 400 }
     );
   }
+  const fileSizeBytes = head.contentLength;
 
   const reportRepository = getReportRepository();
   const report = await reportRepository.create({
@@ -140,7 +124,7 @@ export async function POST(req: Request) {
 
   try {
     const extractor = getTextExtractor();
-    const { markdown } = await extractor.extractFromR2Object(r2Key);
+    const { markdown } = await extractor.extractFromStorageObject(r2Key);
     await reportRepository.setExtractedText(report.id, markdown);
   } catch (error) {
     // Metin çıkarma başarısız olsa bile rapor kaydı geçerlidir — sonradan

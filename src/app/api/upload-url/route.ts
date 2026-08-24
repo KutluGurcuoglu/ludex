@@ -1,14 +1,11 @@
 import { NextResponse } from "next/server";
-import { PutObjectCommand } from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { auth } from "@/auth";
-import { getR2Client, getR2BucketName } from "@/lib/storage/r2-client";
+import { getStorageProvider } from "@/lib/storage";
 import { checkRateLimit } from "@/lib/rate-limit";
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
-const PRESIGN_EXPIRY_SECONDS = 60;
 const UPLOAD_URL_RATE_LIMIT = 20;
 const UPLOAD_URL_RATE_WINDOW_MS = 60 * 60 * 1000; // 1 saat
 
@@ -64,29 +61,14 @@ export async function POST(req: Request) {
     );
   }
 
-  const { filename, contentType, fileSize } = parsed.data;
+  const { contentType, fileSize } = parsed.data;
   const fileKey = `pdfs/${randomUUID()}.pdf`;
 
   try {
-    const bucket = getR2BucketName();
-    const s3 = getR2Client();
-    const command = new PutObjectCommand({
-      Bucket: bucket,
-      Key: fileKey,
-      ContentType: contentType,
-      ContentLength: fileSize,
-      Metadata: {
-        "original-filename": encodeURIComponent(filename),
-      },
-    });
-
-    const signedUrl = await getSignedUrl(s3, command, {
-      expiresIn: PRESIGN_EXPIRY_SECONDS,
-    });
-
-    return NextResponse.json({ success: true, url: signedUrl, key: fileKey });
+    const url = await getStorageProvider().createUploadUrl(fileKey, contentType, fileSize);
+    return NextResponse.json({ success: true, url, key: fileKey });
   } catch (error) {
-    console.error("R2 presign hatası:", error);
+    console.error("Yükleme linki oluşturma hatası:", error);
     return NextResponse.json(
       { error: "Güvenli yükleme linki oluşturulamadı." },
       { status: 500 }

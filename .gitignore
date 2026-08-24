@@ -37,6 +37,9 @@ yarn-error.log*
 # vercel
 .vercel
 
+# local file storage fallback (dev only, used when R2 isn't configured)
+/.local-storage
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
