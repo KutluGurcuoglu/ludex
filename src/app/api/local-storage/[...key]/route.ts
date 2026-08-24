@@ -27,7 +27,9 @@ export async function PUT(req: Request, { params }: { params: Promise<{ key: str
   if (guard) return guard;
 
   const session = await auth();
-  if (!session?.user || session.user.role !== "contestant") {
+  // Yarışmacı rapor PDF'i, admin şartname/rapor şablonu PDF'i yüklemek için kullanır
+  // (bkz. /api/upload-url — bu route yalnızca o uçtan alınan anahtarlarla çağrılır).
+  if (!session?.user || (session.user.role !== "contestant" && session.user.role !== "admin")) {
     return NextResponse.json({ error: "Yetkisiz erişim." }, { status: 401 });
   }
 

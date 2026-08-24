@@ -117,8 +117,12 @@ model Category {
   reportTemplate     Json?
   templateSections   Json      @default("[]")
   evaluationCriteria Json      @default("[]")
+  criteria           Json      @default("[]")
   submissionOpensAt  DateTime?
   submissionClosesAt DateTime?
+  resultsReleaseAt   DateTime?
+  resultsReleasedAt  DateTime?
+  evaluationDeadline DateTime?
   createdAt          DateTime  @default(now())
 
   judgeCategories JudgeCategory[]
@@ -141,8 +145,6 @@ model ScoreCriterion {
   maxScore    Float
   description String?
   createdAt   DateTime @default(now())
-
-  criterionScores CriterionScore[]
 }
 
 model Report {
@@ -217,12 +219,15 @@ model JudgeEvaluation {
 model CriterionScore {
   id           String  @id @default(uuid())
   evaluationId String
+  // getEffectiveCriteria() ile aynı kural: ya global ScoreCriterion.id ya da
+  // bir Category.criteria[].id — ikisi de aynı tabloda değil, bu yüzden burada
+  // kasıtlı olarak bir FK yok; geçerliliği route katmanı (getEffectiveCriteria)
+  // zaten kontrol ediyor.
   criterionId  String
   score        Float
   comment      String?
 
   evaluation JudgeEvaluation @relation(fields: [evaluationId], references: [id], onDelete: Cascade)
-  criterion  ScoreCriterion  @relation(fields: [criterionId], references: [id])
 
   @@unique([evaluationId, criterionId])
 }

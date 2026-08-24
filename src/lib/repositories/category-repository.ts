@@ -1,6 +1,7 @@
+import { randomUUID } from "node:crypto";
 import { Prisma, type Category as PrismaCategory } from "@prisma/client";
 import { db } from "@/lib/db";
-import type { Category, CompetitionDocument } from "@/types";
+import type { Category, CompetitionDocument, ScoreCriterion } from "@/types";
 
 function slugify(name: string): string {
   return name
@@ -96,6 +97,19 @@ export interface CategoryRepository {
     id: string,
     window: { opensAt: string | null; closesAt: string | null }
   ): Promise<CategoryRecord | null>;
+  addCriterion(
+    id: string,
+    input: { label: string; maxScore: number; description?: string }
+  ): Promise<ScoreCriterion | null>;
+  updateCriterion(
+    id: string,
+    criterionId: string,
+    updates: { label?: string; maxScore?: number; description?: string }
+  ): Promise<ScoreCriterion | null>;
+  deleteCriterion(id: string, criterionId: string): Promise<boolean>;
+  setResultsReleaseAt(id: string, releaseAt: string | null): Promise<CategoryRecord | null>;
+  markResultsReleased(id: string): Promise<CategoryRecord | null>;
+  setEvaluationDeadline(id: string, deadline: string | null): Promise<CategoryRecord | null>;
 }
 
 function toCategoryRecord(row: PrismaCategory): CategoryRecord {
@@ -111,6 +125,10 @@ function toCategoryRecord(row: PrismaCategory): CategoryRecord {
     submissionClosesAt: row.submissionClosesAt?.toISOString() ?? null,
     templateSections: row.templateSections as unknown as CategoryTemplateSection[],
     evaluationCriteria: row.evaluationCriteria as unknown as CategoryEvaluationCriterion[],
+    criteria: row.criteria as unknown as ScoreCriterion[],
+    resultsReleaseAt: row.resultsReleaseAt?.toISOString() ?? null,
+    resultsReleasedAt: row.resultsReleasedAt?.toISOString() ?? null,
+    evaluationDeadline: row.evaluationDeadline?.toISOString() ?? null,
   };
 }
 
@@ -226,6 +244,99 @@ class PrismaCategoryRepository implements CategoryRepository {
         submissionOpensAt: window.opensAt ? new Date(window.opensAt) : null,
         submissionClosesAt: window.closesAt ? new Date(window.closesAt) : null,
       },
+    });
+    return toCategoryRecord(row);
+  }
+
+  async addCriterion(
+    id: string,
+    input: { label: string; maxScore: number; description?: string }
+  ): Promise<ScoreCriterion | null> {
+    const category = await db.category.findUnique({ where: { id }, select: { criteria: true } });
+    if (!category) return null;
+
+    const criterion: ScoreCriterion = {
+      id: randomUUID(),
+      label: input.label,
+      maxScore: input.maxScore,
+      description: input.description,
+    };
+    const criteria = [...(category.criteria as unknown as ScoreCriterion[]), criterion];
+
+    await db.category.update({
+      where: { id },
+      data: { criteria: criteria as unknown as Prisma.InputJsonValue },
+    });
+    return criterion;
+  }
+
+  async updateCriterion(
+    id: string,
+    criterionId: string,
+    updates: { label?: string; maxScore?: number; description?: string }
+  ): Promise<ScoreCriterion | null> {
+    const category = await db.category.findUnique({ where: { id }, select: { criteria: true } });
+    if (!category) return null;
+
+    const criteria = category.criteria as unknown as ScoreCriterion[];
+    const index = criteria.findIndex((c) => c.id === criterionId);
+    if (index === -1) return null;
+
+    const updated: ScoreCriterion = { ...criteria[index], ...updates };
+    const nextCriteria = [...criteria];
+    nextCriteria[index] = updated;
+
+    await db.category.update({
+      where: { id },
+      data: { criteria: nextCriteria as unknown as Prisma.InputJsonValue },
+    });
+    return updated;
+  }
+
+  async deleteCriterion(id: string, criterionId: string): Promise<boolean> {
+    const category = await db.category.findUnique({ where: { id }, select: { criteria: true } });
+    if (!category) return false;
+
+    const criteria = category.criteria as unknown as ScoreCriterion[];
+    const nextCriteria = criteria.filter((c) => c.id !== criterionId);
+    if (nextCriteria.length === criteria.length) return false;
+
+    await db.category.update({
+      where: { id },
+      data: { criteria: nextCriteria as unknown as Prisma.InputJsonValue },
+    });
+    return true;
+  }
+
+  async setResultsReleaseAt(id: string, releaseAt: string | null): Promise<CategoryRecord | null> {
+    const exists = await db.category.findUnique({ where: { id }, select: { id: true } });
+    if (!exists) return null;
+
+    const row = await db.category.update({
+      where: { id },
+      data: { resultsReleaseAt: releaseAt ? new Date(releaseAt) : null },
+    });
+    return toCategoryRecord(row);
+  }
+
+  async markResultsReleased(id: string): Promise<CategoryRecord | null> {
+    const exists = await db.category.findUnique({ where: { id }, select: { id: true } });
+    if (!exists) return null;
+
+    const row = await db.category.update({
+      where: { id },
+      data: { resultsReleasedAt: new Date() },
+    });
+    return toCategoryRecord(row);
+  }
+
+  async setEvaluationDeadline(id: string, deadline: string | null): Promise<CategoryRecord | null> {
+    const exists = await db.category.findUnique({ where: { id }, select: { id: true } });
+    if (!exists) return null;
+
+    const row = await db.category.update({
+      where: { id },
+      data: { evaluationDeadline: deadline ? new Date(deadline) : null },
     });
     return toCategoryRecord(row);
   }

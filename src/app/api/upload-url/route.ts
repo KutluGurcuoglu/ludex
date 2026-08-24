@@ -30,7 +30,8 @@ const requestSchema = z.object({
 
 export async function POST(req: Request) {
   const session = await auth();
-  if (!session?.user || session.user.role !== "contestant") {
+  // Yarışmacı rapor PDF'i, admin şartname/rapor şablonu PDF'i yüklemek için kullanır.
+  if (!session?.user || (session.user.role !== "contestant" && session.user.role !== "admin")) {
     return NextResponse.json({ error: "Yetkisiz erişim." }, { status: 401 });
   }
 
