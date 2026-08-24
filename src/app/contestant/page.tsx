@@ -12,6 +12,7 @@ import {
   Loader2,
   Menu,
   Send,
+  Sparkles,
   UploadCloud,
   User as UserIcon,
   X,
@@ -778,6 +779,64 @@ function ContestantDashboard() {
                             {e.overallComment}
                           </p>
                         ) : null,
+                      )}
+                    </motion.div>
+                  )}
+
+                  {detailReport.aiFeedback && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ type: "spring", stiffness: 400, damping: 30 }}
+                      className="space-y-3 rounded-2xl border border-primary/20 bg-primary/5 p-4 backdrop-blur-md"
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <Sparkles className="size-4 text-primary" />
+                        <p className="text-sm font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
+                          AI Destekli Geri Bildirim
+                        </p>
+                      </div>
+                      <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                        Bu, hakemin nihai kararı değil; raporun otomatik bir ön analizidir.
+                      </p>
+
+                      {detailReport.aiFeedback.strengths.length > 0 && (
+                        <div>
+                          <p className="mb-1 text-xs font-semibold text-emerald-700 dark:text-emerald-400">
+                            Güçlü Yönler
+                          </p>
+                          <ul className="list-inside list-disc space-y-0.5 text-sm text-zinc-600 dark:text-zinc-300">
+                            {detailReport.aiFeedback.strengths.map((s) => (
+                              <li key={s}>{s}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      {detailReport.aiFeedback.areasForImprovement.length > 0 && (
+                        <div>
+                          <p className="mb-1 text-xs font-semibold text-amber-700 dark:text-amber-400">
+                            Geliştirilebilir Alanlar
+                          </p>
+                          <ul className="list-inside list-disc space-y-0.5 text-sm text-zinc-600 dark:text-zinc-300">
+                            {detailReport.aiFeedback.areasForImprovement.map((s) => (
+                              <li key={s}>{s}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      {detailReport.aiFeedback.recommendations.length > 0 && (
+                        <div>
+                          <p className="mb-1 text-xs font-semibold text-primary">
+                            Geliştirme Önerileri
+                          </p>
+                          <ul className="list-inside list-disc space-y-0.5 text-sm text-zinc-600 dark:text-zinc-300">
+                            {detailReport.aiFeedback.recommendations.map((s) => (
+                              <li key={s}>{s}</li>
+                            ))}
+                          </ul>
+                        </div>
                       )}
                     </motion.div>
                   )}

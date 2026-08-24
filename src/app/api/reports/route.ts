@@ -7,7 +7,10 @@ import { getR2Client, getR2BucketName } from "@/lib/storage/r2-client";
 import { getReportRepository, type ReportRecord } from "@/lib/repositories/report-repository";
 import { getCategoryRepository, isSubmissionWindowOpen } from "@/lib/repositories/category-repository";
 import { getUserRepository } from "@/lib/repositories/user-repository";
+import { getEvaluationRepository, type EvaluationRecord } from "@/lib/repositories/evaluation-repository";
 import { getTextExtractor } from "@/lib/text-extraction";
+import { deriveAiFeedback } from "@/lib/ai-feedback";
+import type { AIContestantFeedback } from "@/types";
 
 // LlamaParse gerçek modda çalıştığında iş birkaç dakika sürebilir; Vercel
 // Hobby planındaki varsayılan (10sn) süreyi aşmamak için izin verilen üst
@@ -36,7 +39,11 @@ const createReportSchema = z.object({
  * yalnızca includeAiEvaluation true ise dahil edilir (bkz. requireRole
  * kontrolleri — yarışmacıya asla true geçilmemeli).
  */
-async function toApiReport(report: ReportRecord, includeAiEvaluation: boolean) {
+async function toApiReport(
+  report: ReportRecord,
+  includeAiEvaluation: boolean,
+  aiFeedback: AIContestantFeedback | null = null
+) {
   const [contestant, pdfUrl] = await Promise.all([
     getUserRepository().findById(report.contestantId),
     getSignedUrl(
@@ -59,6 +66,7 @@ async function toApiReport(report: ReportRecord, includeAiEvaluation: boolean) {
     assignedJudgeIds: report.assignedJudgeIds,
     assignedAt: report.assignedAt,
     submittedAt: report.submittedAt,
+    aiFeedback,
   };
 
   return includeAiEvaluation ? { ...base, aiEvaluation: report.aiEvaluation } : base;
@@ -165,6 +173,28 @@ export async function GET() {
 
   // Yarışmacıya AI değerlendirmesi asla dönmemeli; admin/hakem görebilir.
   const includeAiEvaluation = role !== "contestant";
-  const reports = await Promise.all(records.map((r) => toApiReport(r, includeAiEvaluation)));
+
+  // Yarışmacı yalnızca KENDİ raporunun sonucu yayınlandıysa (visibleToContestant)
+  // AI destekli geri bildirimi (strengths/areasForImprovement/recommendations)
+  // görebilir — benzerlik/kritik bulgu gibi hakem/admin'e özel ayrıntılar hiçbir
+  // zaman bu yanıta dahil edilmez (bkz. toApiReport, deriveAiFeedback).
+  let evaluationsByReport: Map<string, EvaluationRecord[]> | null = null;
+  if (role === "contestant") {
+    evaluationsByReport = new Map();
+    for (const e of await getEvaluationRepository().listAll()) {
+      const list = evaluationsByReport.get(e.reportId) ?? [];
+      list.push(e);
+      evaluationsByReport.set(e.reportId, list);
+    }
+  }
+
+  const reports = await Promise.all(
+    records.map((r) => {
+      const aiFeedback = evaluationsByReport
+        ? deriveAiFeedback(r, evaluationsByReport.get(r.id) ?? [])
+        : null;
+      return toApiReport(r, includeAiEvaluation, aiFeedback);
+    })
+  );
   return NextResponse.json({ reports });
 }

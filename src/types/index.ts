@@ -116,6 +116,18 @@ export type ReportStatus =
   | "completed" // Hakem puanlamayı tamamladı
   | "disqualified"; // Hakemin elenme önerisi admin tarafından onaylandı
 
+/**
+ * Yarışmacıya gösterilebilecek, nihai bir karar niteliği taşımayan AI geri
+ * bildirimi. Sadece bir raporun sonucu yayınlandıktan (visibleToContestant)
+ * sonra dolu gelir — bkz. GET /api/reports. Benzerlik/kritik bulgu gibi
+ * hakem/admin'e özel ayrıntılar kasıtlı olarak burada yer almaz.
+ */
+export interface AIContestantFeedback {
+  strengths: string[];
+  areasForImprovement: string[];
+  recommendations: string[];
+}
+
 export interface Report {
   id: string;
   title: string;
@@ -132,6 +144,8 @@ export interface Report {
   /** Hakem raporu ilk kez "İncelemede" durumuna aldığında damgalanır — zaman çizelgesi için. */
   reviewStartedAt?: string;
   submittedAt: string;
+  /** Yalnızca yarışmacı görünümünde ve sonuç yayınlandıktan sonra dolu gelir. */
+  aiFeedback?: AIContestantFeedback | null;
 }
 
 export type Severity = "low" | "medium" | "high";
