@@ -8,6 +8,7 @@ import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
 import {
   AlertOctagon,
+  AlertTriangle,
   Bot,
   CheckCircle2,
   ChevronLeft,
@@ -67,12 +68,13 @@ import { getEffectiveCriteria, useAppStore, useCurrentUser } from "@/store/useAp
 import * as evaluationsService from "@/services/evaluations.service";
 import { refreshReports, refreshEvaluations, refreshScoreCriteria } from "@/services/sync";
 import * as aiAnalysisService from "@/services/ai-analysis.service";
-import { simulateNetworkDelay } from "@/services/delay";
+import * as copilotService from "@/services/copilot.service";
 import { buildHighlightQuery, highlightTextItem } from "@/lib/pdf-highlight";
 import type {
   AIAnalysisResult,
   ComplianceCheckItem,
   CopilotChatMessage,
+  CriterionAiEvaluation,
   DisqualificationRecommendation,
   Severity,
 } from "@/types";
@@ -88,66 +90,11 @@ const SEVERITY_CLASS: Record<Severity, string> = {
   high: "border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300",
 };
 
-async function simulateCopilotReply(question: string, analysis: AIAnalysisResult | null) {
-  const q = question.toLowerCase();
-
-  if (!analysis) {
-    return simulateNetworkDelay(
-      "Bu soruyu yanıtlayabilmem için önce LUDEX butonuna basıp analiz başlatman gerekiyor.",
-      600,
-      1200,
-    );
-  }
-
-  if (q.includes("şartname") || q.includes("sartname") || q.includes("kritik")) {
-    const reply =
-      analysis.criticalFindings.length > 0
-        ? `Sayfa ${analysis.evidences.find((e) => e.id === analysis.criticalFindings[0].evidenceId)?.page}'de belirtilen "${
-            analysis.criticalFindings[0].findingText
-          }" bulgusudur. Şartnamenin ilgili maddesi: "${analysis.criticalFindings[0].ruleText}"`
-        : "Bu raporda kritik bir şartname bulgusu tespit edilmedi.";
-    return simulateNetworkDelay(reply, 900, 1800);
-  }
-
-  if (q.includes("uygulanabilir")) {
-    const weakness = analysis.contentAnalysis.weaknesses[0];
-    const reply = weakness
-      ? `Uygulanabilirlik puanı, şu noktadan dolayı sınırlı görünüyor: "${weakness}"`
-      : "İçerik analizinde uygulanabilirliği düşüren belirgin bir zayıf yön bulunamadı.";
-    return simulateNetworkDelay(reply, 900, 1800);
-  }
-
-  if (q.includes("benzerlik")) {
-    const top = analysis.similarReports[0];
-    const reply = top
-      ? `Benzerlik oranı %${analysis.similarityScore}. En yakın eşleşme ${top.reportLabel} ile %${top.matchPercentage}. İlgili bölümü tekrar incelemeni öneririm.`
-      : "Bu rapor için benzerlik verisi henüz hazır değil.";
-    return simulateNetworkDelay(reply, 900, 1800);
-  }
-
-  if (q.includes("bayrak") || q.includes("flag")) {
-    const reply =
-      analysis.redFlags.length > 0
-        ? `Bu raporda ${analysis.redFlags.length} kırmızı bayrak var: ${analysis.redFlags
-            .map((f) => f.title)
-            .join(", ")}.`
-        : "Bu raporda herhangi bir kırmızı bayrak tespit edilmedi.";
-    return simulateNetworkDelay(reply, 900, 1800);
-  }
-
-  if (q.includes("puan") || q.includes("skor")) {
-    const reply =
-      analysis.suggestedScore != null
-        ? `Ludex'in önerdiği puan ${analysis.suggestedScore}. Kendi puanlamanı bununla karşılaştırabilirsin.`
-        : "Henüz bir puan önerisi yok.";
-    return simulateNetworkDelay(reply, 900, 1800);
-  }
-
-  return simulateNetworkDelay(
-    "Bu konuda elimde daha fazla detay yok, ama rapor içeriğine ve analiz sonuçlarına göz atmanı öneririm.",
-    900,
-    1800,
-  );
+/** ✅ uygun / ⚠ inceleme gerekli / ❌ sorun bulundu — gerçek backend verisine göre üç durumlu ikon. */
+function ComplianceStatusIcon({ item }: { item: ComplianceCheckItem }) {
+  if (item.passed) return <CheckCircle2 className="size-4 shrink-0 text-emerald-500" />;
+  if (item.severity === "high") return <XCircle className="size-4 shrink-0 text-red-500" />;
+  return <AlertTriangle className="size-4 shrink-0 text-amber-500" />;
 }
 
 function ComplianceRow({
@@ -161,14 +108,12 @@ function ComplianceRow({
   onEvidence: (id: string) => void;
   compact?: boolean;
 }) {
+  const showUnverifiable = item.unverifiable && item.evidenceIds.length === 0;
+
   if (compact) {
     return (
       <div className="flex items-center gap-3 border-b border-border/60 py-2 last:border-0">
-        {item.passed ? (
-          <CheckCircle2 className="size-4 shrink-0 text-emerald-500" />
-        ) : (
-          <XCircle className="size-4 shrink-0 text-red-500" />
-        )}
+        <ComplianceStatusIcon item={item} />
         <p className="min-w-0 flex-1 truncate text-base font-medium">{item.label}</p>
         {item.evidenceIds.length > 0 && (
           <Button
@@ -189,13 +134,54 @@ function ComplianceRow({
     <div className="space-y-1 rounded-lg bg-muted/40 p-3">
       <div className="flex items-center justify-between gap-2">
         <p className="text-base font-medium">{item.label}</p>
-        {item.passed ? (
-          <CheckCircle2 className="size-4 shrink-0 text-emerald-500" />
-        ) : (
-          <XCircle className="size-4 shrink-0 text-red-500" />
-        )}
+        <ComplianceStatusIcon item={item} />
       </div>
       <p className="text-base text-muted-foreground">{item.detail}</p>
+      {item.evidenceIds.map((eid) => (
+        <Button
+          key={eid}
+          type="button"
+          variant="link"
+          size="sm"
+          className="h-auto p-0 text-base"
+          onClick={() => onEvidence(eid)}
+        >
+          Neden? (Sayfa {analysis.evidences.find((e) => e.id === eid)?.page})
+        </Button>
+      ))}
+      {showUnverifiable && (
+        <p className="text-sm italic text-muted-foreground">
+          Bu bulgu belge içinde işaretlenemez; bölüm eksik.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** Kriter bazlı AI değerlendirmesi satırı — ✅ puanlanmış / ⚠ ölçek tanımlı değil. */
+function CriterionEvaluationRow({
+  item,
+  analysis,
+  onEvidence,
+}: {
+  item: CriterionAiEvaluation;
+  analysis: AIAnalysisResult;
+  onEvidence: (id: string) => void;
+}) {
+  return (
+    <div className="space-y-1 rounded-lg bg-muted/40 p-3">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-base font-medium">{item.label}</p>
+        {item.score != null ? (
+          <span className="text-base font-semibold text-primary">
+            {item.score}
+            {item.maxScore != null ? ` / ${item.maxScore}` : ""}
+          </span>
+        ) : (
+          <AlertTriangle className="size-4 shrink-0 text-amber-500" />
+        )}
+      </div>
+      <p className="text-base text-muted-foreground">{item.reason}</p>
       {item.evidenceIds.map((eid) => (
         <Button
           key={eid}
@@ -216,17 +202,26 @@ type AnalysisState =
   | "idle"
   | "checking"
   | "awaiting-decision"
-  | "continuing"
   | "done"
   | "eliminated"
-  | "error";
+  | "error"
+  | "stale";
 
-const ANALYSIS_STEPS = [
-  "Dil ve şartname denetleniyor...",
-  "Şablon inceleniyor...",
-  "İçerik analiz ediliyor...",
-  "Kategori içi benzerlik taranıyor...",
-  "AI yazım riski değerlendiriliyor...",
+/**
+ * Tek bir Cloudflare structured-output çağrısında hep birlikte hesaplanan
+ * gerçek alt analizler. Bunlar ayrı ayrı sunucuda bitmiş gibi sahte bir
+ * ilerleme çubuğuyla gösterilmez — çağrı sürerken tamamı "bekleniyor" olarak
+ * listelenir, sonuç geldiğinde her biri gerçek verisiyle (bkz. Aşama 1-7
+ * accordion bölümleri) birlikte görünür.
+ */
+const ANALYSIS_CHECK_LABELS = [
+  "Dil kontrolü",
+  "Şartname uygunluğu",
+  "Şablon uygunluğu",
+  "Başlık ve içerik kontrolü",
+  "Kategori uygunluğu",
+  "Benzerlik analizi",
+  "Kriter bazlı AI değerlendirmesi",
 ];
 
 type GateFindingKind = "critical" | "language" | "spec";
@@ -300,13 +295,15 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
   const [analysisState, setAnalysisState] = useState<AnalysisState>("idle");
   const [analysis, setAnalysis] = useState<AIAnalysisResult | null>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
-  const [loadingStepIndex, setLoadingStepIndex] = useState(0);
   const [copilotOpen, setCopilotOpen] = useState(false);
   const [compactCompliance, setCompactCompliance] = useState(false);
 
   const [numPages, setNumPages] = useState(0);
   const [pageNumber, setPageNumber] = useState(1);
   const [focusedEvidenceId, setFocusedEvidenceId] = useState<string | null>(null);
+  const [focusedPassage, setFocusedPassage] = useState<{ page: number; excerpt: string } | null>(
+    null,
+  );
 
   const existingEvaluation = useMemo(
     () => evaluations.find((e) => e.reportId === reportId && e.judgeId === user?.id) ?? null,
@@ -411,12 +408,12 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
     };
   }, [analysis]);
 
-  async function runRemainingSteps() {
-    setAnalysisState("continuing");
-    for (let i = 1; i < ANALYSIS_STEPS.length; i++) {
-      setLoadingStepIndex(i);
-      await simulateNetworkDelay(null, 900, 1100);
-    }
+  /**
+   * Sonuçlar zaten tek bir gerçek API çağrısıyla birlikte geldi (bkz.
+   * handleStartAnalysis) — burada yapay bir gecikme/adım animasyonu yok,
+   * yalnızca hazır sonucu göstermeye geçiliyoruz.
+   */
+  function revealResults() {
     setAnalysisState("done");
     setMessages((prev) => [
       ...prev,
@@ -433,8 +430,6 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
   async function handleStartAnalysis() {
     setAnalysisState("checking");
     setAnalysisError(null);
-    setLoadingStepIndex(0);
-    await simulateNetworkDelay(null, 900, 1100);
 
     let result: AIAnalysisResult;
     try {
@@ -451,7 +446,7 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
       return;
     }
 
-    await runRemainingSteps();
+    revealResults();
   }
 
   useEffect(() => {
@@ -466,7 +461,7 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
         "Elenme önerildiği için kalan analiz aşamaları (şablon, içerik, benzerlik, AI yazım riski) atlandı.",
       );
     } else {
-      runRemainingSteps();
+      revealResults();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [analysisState, analysis, findingDecisions, gateFindings]);
@@ -474,6 +469,9 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
   useEffect(() => {
     if (isLoading || existingEvaluation?.status !== "submitted") return;
     if (analysisState !== "idle" || analysis) return;
+    // Yönergeler değiştiyse burada sessizce yeniden hesaplamak yerine
+    // aşağıdaki stale-kontrol effect'i devreye girer.
+    if (report?.aiAnalysisStale) return;
 
     let active = true;
     Promise.resolve()
@@ -494,20 +492,40 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
     return () => {
       active = false;
     };
-  }, [isLoading, existingEvaluation, analysisState, analysis, reportId]);
+  }, [isLoading, existingEvaluation, analysisState, analysis, reportId, report?.aiAnalysisStale]);
+
+  useEffect(() => {
+    // Admin şartname/şablon/kriterleri bu raporun daha önceki AIAnalysis'i
+    // ÜRETİLDİKTEN SONRA değiştirdiyse (bkz. GET /api/reports'un
+    // aiAnalysisStale hesaplaması), eski sonucu sessizce göstermeye/yeniden
+    // hesaplamaya devam ETMEYİZ — hakemi açıkça uyarırız, yeniden çalıştırma
+    // kararı ona ait.
+    if (isLoading || !report?.aiAnalysisStale) return;
+    if (analysisState !== "idle") return;
+    setAnalysisState("stale");
+  }, [isLoading, report, analysisState]);
 
   function jumpToEvidence(evidenceId: string) {
     const evidence = analysis?.evidences.find((e) => e.id === evidenceId);
     if (!evidence) return;
     setPageNumber(evidence.page);
     setFocusedEvidenceId(evidenceId);
+    setFocusedPassage(null);
+  }
+
+  /** Benzerlik panelindeki bir eşleşmeye tıklandığında — evidence id'siz, doğrudan gerçek sayfa+alıntıyla. */
+  function jumpToPassage(page: number, excerpt: string) {
+    setPageNumber(page);
+    setFocusedPassage({ page, excerpt });
+    setFocusedEvidenceId(null);
   }
 
   const highlightQuery = useMemo(() => {
+    if (focusedPassage) return buildHighlightQuery(focusedPassage.excerpt);
     if (!focusedEvidenceId || !analysis) return null;
     const evidence = analysis.evidences.find((e) => e.id === focusedEvidenceId);
     return evidence ? buildHighlightQuery(evidence.excerpt) : null;
-  }, [focusedEvidenceId, analysis]);
+  }, [focusedEvidenceId, focusedPassage, analysis]);
 
   function requestFindingDecision(finding: GateFinding, decision: "flagged" | "dismissed") {
     setPendingDecision({ finding, decision });
@@ -590,7 +608,12 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
     setChatInput("");
     setChatSending(true);
 
-    const reply = await simulateCopilotReply(text, analysis);
+    let reply: string;
+    try {
+      reply = await copilotService.askCopilot(reportId, text);
+    } catch (error) {
+      reply = error instanceof Error ? error.message : "Ludex Copilot şu anda yanıt veremiyor.";
+    }
     setChatSending(false);
     setMessages((prev) => [
       ...prev,
@@ -756,23 +779,40 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
                   </Card>
                 )}
 
-                {(analysisState === "checking" || analysisState === "continuing") && (
+                {analysisState === "stale" && (
+                  <Card className="border-amber-300 dark:border-amber-900">
+                    <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
+                      <div className="flex size-14 items-center justify-center rounded-2xl bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400">
+                        <AlertTriangle className="size-7" />
+                      </div>
+                      <div>
+                        <p className="text-base font-semibold">Yarışma yönergeleri değişti</p>
+                        <p className="mt-1 max-w-xs text-base text-muted-foreground">
+                          Ludex analizini yeniden çalıştır.
+                        </p>
+                      </div>
+                      <Button
+                        onClick={handleStartAnalysis}
+                        className="mt-2 gap-2 transition-transform active:scale-[0.98]"
+                      >
+                        <Sparkles className="size-4" />
+                        Yeniden Çalıştır
+                      </Button>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {analysisState === "checking" && (
                   <Card>
                     <CardContent className="flex flex-col items-center gap-4 py-12 text-center">
                       <Loader2 className="size-8 animate-spin text-primary" />
-                      <div className="space-y-1.5">
-                        {ANALYSIS_STEPS.map((step, i) => (
-                          <p
-                            key={step}
-                            className={
-                              i === loadingStepIndex
-                                ? "text-base font-medium text-foreground"
-                                : i < loadingStepIndex
-                                  ? "text-base text-muted-foreground line-through"
-                                  : "text-base text-muted-foreground/40"
-                            }
-                          >
-                            {step}
+                      <p className="text-base font-medium text-foreground">
+                        Ludex semantik analizi çalışıyor...
+                      </p>
+                      <div className="space-y-1">
+                        {ANALYSIS_CHECK_LABELS.map((label) => (
+                          <p key={label} className="text-base text-muted-foreground/60">
+                            {label}
                           </p>
                         ))}
                       </div>
@@ -1060,19 +1100,52 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
                                     </span>
                                   </div>
                                   {match.breakdown.length > 0 && (
-                                    <div className="space-y-1">
-                                      {match.breakdown.map((b) => (
-                                        <div
-                                          key={b.sectionLabel}
-                                          className="flex items-center justify-between text-base"
-                                        >
-                                          <span className="text-muted-foreground">{b.sectionLabel}</span>
-                                          <span>%{b.matchPercentage}</span>
+                                    <div className="space-y-2">
+                                      {match.breakdown.map((b, i) => (
+                                        <div key={`${match.id}-${i}`} className="space-y-1 border-t border-border/60 pt-2 text-base">
+                                          <div>
+                                            <p className="text-sm text-muted-foreground">
+                                              Bu rapor — Sayfa {b.targetPage}
+                                            </p>
+                                            <Button
+                                              type="button"
+                                              variant="link"
+                                              size="sm"
+                                              className="h-auto p-0 text-left text-base italic"
+                                              onClick={() => jumpToPassage(b.targetPage, b.targetExcerpt)}
+                                            >
+                                              &ldquo;{b.targetExcerpt}&rdquo;
+                                            </Button>
+                                          </div>
+                                          <div>
+                                            <p className="text-sm text-muted-foreground">
+                                              Diğer rapor — Sayfa {b.matchedPage}
+                                            </p>
+                                            <p className="italic text-muted-foreground">
+                                              &ldquo;{b.matchedExcerpt}&rdquo;
+                                            </p>
+                                          </div>
                                         </div>
                                       ))}
                                     </div>
                                   )}
                                 </div>
+                              ))}
+                            </AccordionContent>
+                          </AccordionItem>
+
+                          <AccordionItem value="criteria" className="rounded-lg border border-border px-3">
+                            <AccordionTrigger className="text-base font-medium hover:no-underline">
+                              Aşama 7 – Kriter Bazlı AI Değerlendirmesi
+                            </AccordionTrigger>
+                            <AccordionContent className="space-y-2">
+                              {analysis.criteriaEvaluations.map((c) => (
+                                <CriterionEvaluationRow
+                                  key={c.id}
+                                  item={c}
+                                  analysis={analysis}
+                                  onEvidence={jumpToEvidence}
+                                />
                               ))}
                             </AccordionContent>
                           </AccordionItem>
@@ -1114,6 +1187,16 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
                             <p className="mt-1 text-base text-muted-foreground italic">
                               &ldquo;{analysis.evidences.find((e) => e.id === focusedEvidenceId)?.excerpt}
                               &rdquo;
+                            </p>
+                          </div>
+                        )}
+                        {focusedPassage && (
+                          <div className="mt-4 rounded-lg border border-primary/30 bg-primary/5 p-3">
+                            <p className="text-base font-medium text-primary">
+                              Benzer Pasaj (Sayfa {focusedPassage.page})
+                            </p>
+                            <p className="mt-1 text-base text-muted-foreground italic">
+                              &ldquo;{focusedPassage.excerpt}&rdquo;
                             </p>
                           </div>
                         )}
