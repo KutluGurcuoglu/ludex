@@ -113,11 +113,10 @@ function JudgeSearchMenu({
 
 export default function AdminPoolPage() {
   const categories = useAppStore((s) => s.categories);
-  const users = useAppStore((s) => s.users);
+  const judges = useAppStore((s) => s.judges);
   const reports = useAppStore((s) => s.reports);
   const evaluations = useAppStore((s) => s.evaluations);
 
-  const judges = useMemo(() => users.filter((u) => u.role === "judge"), [users]);
   const approvedJudges = useMemo(
     () => judges.filter((j) => j.judgeApprovalStatus === "approved"),
     [judges],

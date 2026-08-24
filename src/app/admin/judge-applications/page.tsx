@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { CheckCircle2, ExternalLink, FileText, Loader2, Sparkles, XCircle } from "lucide-react";
+import { CheckCircle2, ExternalLink, FileText, Loader2, Save, Sparkles, XCircle } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -10,35 +10,64 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useAppStore } from "@/store/useAppStore";
-import * as usersService from "@/services/users.service";
+import * as judgesService from "@/services/judges.service";
+import { refreshJudges } from "@/services/sync";
 import { WORK_STATUS_LABEL, useViewMode } from "../_lib/shared";
 
 export default function AdminJudgeApplicationsPage() {
   const categories = useAppStore((s) => s.categories);
-  const users = useAppStore((s) => s.users);
+  const judges = useAppStore((s) => s.judges);
   const { viewMode } = useViewMode();
   const [selectedJudgeId, setSelectedJudgeId] = useState<string | null>(null);
 
-  const judges = useMemo(() => users.filter((u) => u.role === "judge"), [users]);
   const pendingJudgeApplications = useMemo(
-    () =>
-      judges.filter(
-        (j) => (j.judgeApprovalStatus ?? "pending") === "pending" && j.categoryIds.length > 0,
-      ),
+    () => judges.filter((j) => (j.judgeApprovalStatus ?? "pending") === "pending"),
     [judges],
   );
 
   const [autoApprovingJudges, setAutoApprovingJudges] = useState(false);
   const selectedJudge = pendingJudgeApplications.find((j) => j.id === selectedJudgeId) ?? null;
 
-  async function handleReviewJudge(userId: string, decision: "approved" | "rejected") {
-    await usersService.reviewJudgeApplication(userId, decision);
-    const judge = judges.find((j) => j.id === userId);
-    toast.success(
-      decision === "approved"
-        ? `${judge?.name ?? "Hakem"} onaylandı.`
-        : `${judge?.name ?? "Hakem"} başvurusu reddedildi.`,
+  const [selectedCategoryIds, setSelectedCategoryIds] = useState<string[]>([]);
+  const [savingCategories, setSavingCategories] = useState(false);
+
+  useEffect(() => {
+    setSelectedCategoryIds(selectedJudge?.categoryIds ?? []);
+  }, [selectedJudge]);
+
+  function toggleCategory(categoryId: string) {
+    setSelectedCategoryIds((prev) =>
+      prev.includes(categoryId) ? prev.filter((id) => id !== categoryId) : [...prev, categoryId],
     );
+  }
+
+  async function handleSaveCategories() {
+    if (!selectedJudge) return;
+    setSavingCategories(true);
+    try {
+      await judgesService.setJudgeCategories(selectedJudge.id, selectedCategoryIds);
+      await refreshJudges();
+      toast.success("Uzmanlık alanları güncellendi.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Kategoriler kaydedilemedi.");
+    } finally {
+      setSavingCategories(false);
+    }
+  }
+
+  async function handleReviewJudge(userId: string, decision: "approved" | "rejected") {
+    const judge = judges.find((j) => j.id === userId);
+    try {
+      await judgesService.reviewJudgeApplication(userId, decision);
+      await refreshJudges();
+      toast.success(
+        decision === "approved"
+          ? `${judge?.name ?? "Hakem"} onaylandı.`
+          : `${judge?.name ?? "Hakem"} başvurusu reddedildi.`,
+      );
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Karar kaydedilemedi.");
+    }
   }
 
   async function handleAutoApproveJudges() {
@@ -47,11 +76,17 @@ export default function AdminJudgeApplicationsPage() {
       return;
     }
     setAutoApprovingJudges(true);
-    await Promise.all(
-      pendingJudgeApplications.map((j) => usersService.reviewJudgeApplication(j.id, "approved")),
-    );
-    setAutoApprovingJudges(false);
-    toast.success(`${pendingJudgeApplications.length} hakem başvurusu otomatik onaylandı.`);
+    try {
+      await Promise.all(
+        pendingJudgeApplications.map((j) => judgesService.reviewJudgeApplication(j.id, "approved")),
+      );
+      await refreshJudges();
+      toast.success(`${pendingJudgeApplications.length} hakem başvurusu otomatik onaylandı.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Otomatik onay başarısız oldu.");
+    } finally {
+      setAutoApprovingJudges(false);
+    }
   }
 
   return (
@@ -221,15 +256,37 @@ export default function AdminJudgeApplicationsPage() {
                 <Separator />
 
                 <div>
-                  <p className="mb-1.5 text-sm font-medium text-muted-foreground">Uzmanlık Alanları</p>
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <p className="text-sm font-medium text-muted-foreground">Uzmanlık Alanları</p>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 gap-1.5 px-2 text-xs"
+                      disabled={savingCategories}
+                      onClick={handleSaveCategories}
+                    >
+                      {savingCategories ? (
+                        <Loader2 className="size-3 animate-spin" />
+                      ) : (
+                        <Save className="size-3" />
+                      )}
+                      Kaydet
+                    </Button>
+                  </div>
                   <div className="flex flex-wrap gap-1.5">
-                    {categories
-                      .filter((c) => selectedJudge.categoryIds.includes(c.id))
-                      .map((c) => (
-                        <Badge key={c.id} variant="secondary">
+                    {categories.map((c) => {
+                      const active = selectedCategoryIds.includes(c.id);
+                      return (
+                        <Badge
+                          key={c.id}
+                          variant={active ? "default" : "outline"}
+                          className="cursor-pointer select-none"
+                          onClick={() => toggleCategory(c.id)}
+                        >
                           {c.name}
                         </Badge>
-                      ))}
+                      );
+                    })}
                   </div>
                 </div>
 

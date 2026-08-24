@@ -373,14 +373,6 @@ describe("useAppStore", () => {
     ).toBe(true);
   });
 
-  it("marks a judge-application-review notification for email delivery too", () => {
-    useAppStore.getState().reviewJudgeApplication("judge-2", "approved");
-    const notice = useAppStore
-      .getState()
-      .notifications.find((n) => n.userId === "judge-2" && n.kind === "judge_application_reviewed");
-    expect(notice?.channel).toBe("in_app_and_email");
-  });
-
   it("routes a support message from a judge to every admin", () => {
     useAppStore.getState().sendSupportMessage("judge-1", "Rapor açılmıyor", "PDF yüklenmiyor.");
 

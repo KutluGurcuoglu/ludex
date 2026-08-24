@@ -18,13 +18,12 @@ import { APPROVAL_STATUS_BADGE_CLASS, APPROVAL_STATUS_LABEL, STATUS_BADGE_CLASS,
 
 export default function AdminJudgesPage() {
   const categories = useAppStore((s) => s.categories);
-  const users = useAppStore((s) => s.users);
+  const judges = useAppStore((s) => s.judges);
   const reports = useAppStore((s) => s.reports);
   const evaluations = useAppStore((s) => s.evaluations);
   const globalScoreCriteria = useAppStore((s) => s.scoreCriteria);
   const { viewMode } = useViewMode();
 
-  const judges = useMemo(() => users.filter((u) => u.role === "judge"), [users]);
   const [judgeSearch, setJudgeSearch] = useState("");
   const [selectedJudgeId, setSelectedJudgeId] = useState<string | null>(null);
   const [approvingId, setApprovingId] = useState<string | null>(null);

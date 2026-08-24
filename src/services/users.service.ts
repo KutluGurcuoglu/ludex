@@ -45,11 +45,3 @@ export function submitJudgeApplication(
   useAppStore.getState().submitJudgeApplication(userId, input);
   return simulateNetworkDelay(undefined);
 }
-
-export function reviewJudgeApplication(
-  userId: string,
-  decision: Parameters<AppState["reviewJudgeApplication"]>[1],
-): Promise<void> {
-  useAppStore.getState().reviewJudgeApplication(userId, decision);
-  return simulateNetworkDelay(undefined);
-}

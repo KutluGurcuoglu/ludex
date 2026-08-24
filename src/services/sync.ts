@@ -2,6 +2,7 @@ import { useAppStore } from "@/store/useAppStore";
 import * as reportsService from "./reports.service";
 import * as categoriesService from "./categories.service";
 import * as evaluationsService from "./evaluations.service";
+import * as judgesService from "./judges.service";
 
 /**
  * Sayfalar hâlâ useAppStore selector'larından okuyor (bkz. reports/categories/
@@ -29,4 +30,9 @@ export async function refreshEvaluations(): Promise<void> {
 export async function refreshScoreCriteria(): Promise<void> {
   const criteria = await evaluationsService.getScoreCriteria();
   useAppStore.getState().setScoreCriteria(criteria);
+}
+
+export async function refreshJudges(): Promise<void> {
+  const judges = await judgesService.getJudges();
+  useAppStore.getState().setJudges(judges);
 }

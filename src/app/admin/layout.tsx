@@ -27,6 +27,7 @@ import {
   refreshCategories,
   refreshEvaluations,
   refreshScoreCriteria,
+  refreshJudges,
 } from "@/services/sync";
 import {
   AdminSkeleton,
@@ -51,6 +52,7 @@ function AdminShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const users = useAppStore((s) => s.users);
+  const judges = useAppStore((s) => s.judges);
   const evaluations = useAppStore((s) => s.evaluations);
   const reports = useAppStore((s) => s.reports);
   const supportMessages = useAppStore((s) => s.supportMessages);
@@ -67,6 +69,7 @@ function AdminShell({ children }: { children: React.ReactNode }) {
       usersService.getUsers(),
       refreshEvaluations(),
       refreshScoreCriteria(),
+      refreshJudges(),
       supportService.getSupportMessages(),
     ])
       .catch((error) => {
@@ -80,12 +83,11 @@ function AdminShell({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  const judges = useMemo(() => users.filter((u) => u.role === "judge"), [users]);
   const contestants = useMemo(() => users.filter((u) => u.role === "contestant"), [users]);
   const pendingJudgeApplications = useMemo(
     () =>
       judges.filter(
-        (j) => (j.judgeApprovalStatus ?? "pending") === "pending" && j.categoryIds.length > 0,
+        (j) => (j.judgeApprovalStatus ?? "pending") === "pending",
       ),
     [judges],
   );

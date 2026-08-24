@@ -8,7 +8,6 @@ import type {
   Category,
   CompetitionDocument,
   FaqEntry,
-  JudgeApprovalStatus,
   JudgeEvaluation,
   JudgeWorkStatus,
   Report,
@@ -426,6 +425,8 @@ export interface AppState {
   scoreCriteria: ScoreCriterion[];
   faqs: FaqEntry[];
   users: User[];
+  /** Admin'in hakem atama/onay ekranlarının okuduğu, gerçek backend'den gelen hakem listesi. */
+  judges: User[];
   credentials: Record<string, string>;
   reports: Report[];
   evaluations: JudgeEvaluation[];
@@ -447,6 +448,7 @@ export interface AppState {
   setEvaluations: (evaluations: JudgeEvaluation[]) => void;
   setScoreCriteria: (criteria: ScoreCriterion[]) => void;
   setUsers: (users: User[]) => void;
+  setJudges: (judges: User[]) => void;
 
   markNotificationRead: (id: string) => void;
   markAllNotificationsRead: (userId: string) => void;
@@ -540,10 +542,6 @@ export interface AppState {
       agreementAccepted?: boolean;
     },
   ) => void;
-  reviewJudgeApplication: (
-    userId: string,
-    decision: Exclude<JudgeApprovalStatus, "pending">,
-  ) => void;
 
   addReport: (input: {
     contestantId: string;
@@ -606,6 +604,7 @@ export const useAppStore = create<AppState>()(
       scoreCriteria: SCORE_CRITERIA,
       faqs: SEED_FAQS,
       users: SEED_USERS.map((u) => ({ ...u, emailVerifiedAt: u.createdAt })),
+      judges: [],
       credentials: SEED_CREDENTIALS,
       reports: SEED_REPORTS,
       evaluations: SEED_EVALUATIONS,
@@ -843,25 +842,6 @@ export const useAppStore = create<AppState>()(
         });
       },
 
-      reviewJudgeApplication: (userId, decision) => {
-        set((state) => ({
-          users: state.users.map((u) =>
-            u.id === userId ? { ...u, judgeApprovalStatus: decision } : u,
-          ),
-          notifications: [
-            createNotification({
-              userId,
-              kind: "judge_application_reviewed",
-              title:
-                decision === "approved" ? "Hakem başvurun onaylandı" : "Hakem başvurun reddedildi",
-              link: "/judge",
-              channel: "in_app_and_email",
-            }),
-            ...state.notifications,
-          ],
-        }));
-      },
-
       markNotificationRead: (id) => {
         set((state) => ({
           notifications: state.notifications.map((n) =>
@@ -983,6 +963,7 @@ export const useAppStore = create<AppState>()(
       setEvaluations: (evaluations) => set({ evaluations }),
       setScoreCriteria: (criteria) => set({ scoreCriteria: criteria }),
       setUsers: (users) => set({ users }),
+      setJudges: (judges) => set({ judges }),
 
       updateProfile: (userId, updates) => {
         set((state) => ({
