@@ -52,8 +52,14 @@ import { useAppStore, useCurrentUser } from "@/store/useAppStore";
 import * as usersService from "@/services/users.service";
 import type { UserRole } from "@/types";
 
+/**
+ * `admin` internal rolü, Problem 4'teki "Yarışma Yöneticisi" ve
+ * "Değerlendirme Yöneticisi" sorumluluklarının ikisini birden üstlenir
+ * (MVP'de auth/database seviyesinde ayrı roller açılmadı) — UI'da bunu
+ * yansıtan tek bir etiketle gösterilir; internal `admin` değeri değişmez.
+ */
 const ROLE_LABELS: Record<UserRole, string> = {
-  admin: "Yönetici",
+  admin: "Yarışma & Değerlendirme Yöneticisi",
   judge: "Hakem",
   contestant: "Yarışmacı",
 };

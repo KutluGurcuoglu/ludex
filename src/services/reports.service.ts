@@ -73,3 +73,12 @@ export async function unassignJudge(reportId: string, judgeId: string): Promise<
     throw new Error(data.error ?? "Hakem ataması kaldırılamadı.");
   }
 }
+
+/** Var olan POST /api/reports/:id/evaluate'i tetikler — yeni bir AI backend'i değil. */
+export async function runAiAnalysis(reportId: string): Promise<void> {
+  const res = await fetch(`/api/reports/${reportId}/evaluate`, { method: "POST" });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error ?? "AI analizi başarısız oldu.");
+  }
+}

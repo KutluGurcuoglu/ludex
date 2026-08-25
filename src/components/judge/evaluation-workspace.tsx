@@ -427,6 +427,18 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
     ]);
   }
 
+  /** Yeni gelen (taze çalıştırılmış ya da zaten güncel önbellekten) sonucu, gate bulgusu varsa karar beklemeye, yoksa doğrudan sonuçlara geçirir. */
+  function applyAnalysisResult(result: AIAnalysisResult) {
+    setAnalysis(result);
+
+    if (buildGateFindings(result).length > 0) {
+      setAnalysisState("awaiting-decision");
+      return;
+    }
+
+    revealResults();
+  }
+
   async function handleStartAnalysis() {
     setAnalysisState("checking");
     setAnalysisError(null);
@@ -439,14 +451,7 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
       setAnalysisError(error instanceof Error ? error.message : "AI analizi başlatılamadı.");
       return;
     }
-    setAnalysis(result);
-
-    if (buildGateFindings(result).length > 0) {
-      setAnalysisState("awaiting-decision");
-      return;
-    }
-
-    revealResults();
+    applyAnalysisResult(result);
   }
 
   useEffect(() => {
@@ -467,32 +472,18 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
   }, [analysisState, analysis, findingDecisions, gateFindings]);
 
   useEffect(() => {
-    if (isLoading || existingEvaluation?.status !== "submitted") return;
-    if (analysisState !== "idle" || analysis) return;
-    // Yönergeler değiştiyse burada sessizce yeniden hesaplamak yerine
-    // aşağıdaki stale-kontrol effect'i devreye girer.
-    if (report?.aiAnalysisStale) return;
+    // Raporda zaten güncel (stale olmayan) bir aiEvaluation varsa, hakem
+    // raporu her açışında Cloudflare AI'yı gereksiz yere tekrar çalıştırmak
+    // yerine mevcut sonuç doğrudan gösterilir (bkz. toAIAnalysisResult —
+    // aynı gerçek AI çıktısı → AIAnalysisResult dönüşümü, tek yerden).
+    // Yönergeler değiştiyse (aiAnalysisStale) burada sessizce göstermek
+    // yerine aşağıdaki stale-kontrol effect'i devreye girer.
+    if (isLoading || analysisState !== "idle" || analysis) return;
+    if (!report?.aiEvaluation || report.aiAnalysisStale) return;
 
-    let active = true;
-    Promise.resolve()
-      .then(() => {
-        if (active) setAnalysisState("checking");
-      })
-      .then(() => aiAnalysisService.getAIAnalysis(reportId))
-      .then((result) => {
-        if (!active) return;
-        setAnalysis(result);
-        setAnalysisState("done");
-      })
-      .catch((error) => {
-        if (!active) return;
-        setAnalysisState("error");
-        setAnalysisError(error instanceof Error ? error.message : "AI analizi alınamadı.");
-      });
-    return () => {
-      active = false;
-    };
-  }, [isLoading, existingEvaluation, analysisState, analysis, reportId, report?.aiAnalysisStale]);
+    applyAnalysisResult(aiAnalysisService.toAIAnalysisResult(reportId, report.aiEvaluation));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoading, analysisState, analysis, reportId, report?.aiEvaluation, report?.aiAnalysisStale]);
 
   useEffect(() => {
     // Admin şartname/şablon/kriterleri bu raporun daha önceki AIAnalysis'i

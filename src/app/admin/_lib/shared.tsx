@@ -43,6 +43,7 @@ import {
 import { useAppStore } from "@/store/useAppStore";
 import * as categoriesService from "@/services/categories.service";
 import { refreshCategories, refreshEvaluations } from "@/services/sync";
+import type { AiAnalysisStatus } from "@/lib/ai-analysis-status";
 import type { Category, JudgeApprovalStatus, JudgeWorkStatus, ReportStatus, ScoreCriterion } from "@/types";
 
 function toLocalInputValue(iso: string) {
@@ -91,6 +92,20 @@ export const STATUS_BADGE_CLASS: Record<ReportStatus, string> = {
     "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300",
   disqualified:
     "border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300",
+};
+
+export const AI_ANALYSIS_STATUS_LABEL: Record<AiAnalysisStatus, string> = {
+  pending: "Bekliyor",
+  completed: "Tamamlandı",
+  stale: "Yeniden Analiz Gerekli",
+};
+
+export const AI_ANALYSIS_STATUS_BADGE_CLASS: Record<AiAnalysisStatus, string> = {
+  pending: "border-border bg-muted text-muted-foreground",
+  completed:
+    "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300",
+  stale:
+    "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300",
 };
 
 export const NAV_ITEMS = [
@@ -143,7 +158,7 @@ export function StatCard({
 }: {
   icon: typeof FileText;
   label: string;
-  value: number;
+  value: number | string;
   accent?: Accent;
 }) {
   return (

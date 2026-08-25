@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { AlertTriangle, ChevronDown, Loader2, Plus, Search, Sparkles, X } from "lucide-react";
+import { AlertTriangle, Bot, ChevronDown, Loader2, Plus, Search, Sparkles, X } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -42,8 +42,16 @@ import * as reportsService from "@/services/reports.service";
 import { refreshReports } from "@/services/sync";
 import { ReportTimeline } from "@/components/report-timeline";
 import { aggregateEvaluations } from "@/lib/scoring";
+import { getAiAnalysisStatus } from "@/lib/ai-analysis-status";
 import type { ReportStatus } from "@/types";
-import { formatDate, formatFileSize, STATUS_BADGE_CLASS, STATUS_LABEL } from "../_lib/shared";
+import {
+  AI_ANALYSIS_STATUS_BADGE_CLASS,
+  AI_ANALYSIS_STATUS_LABEL,
+  formatDate,
+  formatFileSize,
+  STATUS_BADGE_CLASS,
+  STATUS_LABEL,
+} from "../_lib/shared";
 import type { User } from "@/types";
 
 /**
@@ -134,6 +142,7 @@ export default function AdminPoolPage() {
   } | null>(null);
   const [assigning, setAssigning] = useState(false);
   const [autoAssigning, setAutoAssigning] = useState(false);
+  const [bulkAnalyzing, setBulkAnalyzing] = useState(false);
 
   const filteredReports = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -248,6 +257,50 @@ export default function AdminPoolPage() {
     }
   }
 
+  /**
+   * Var olan POST /api/reports/:id/evaluate'i kullanır — yeni bir AI backend'i
+   * değil. Cloudflare'e gereksiz paralel yük bindirmemek için raporlar
+   * sırayla (Promise.all değil) analiz edilir; bir rapor hata verse bile
+   * batch tamamen bırakılmaz, kalan raporlar işlenmeye devam eder.
+   */
+  async function handleBulkAnalyze() {
+    const selectedReports = reports.filter((r) => selectedIds.includes(r.id));
+    const toAnalyze = selectedReports.filter((r) => getAiAnalysisStatus(r) !== "completed");
+    const alreadyFresh = selectedReports.length - toAnalyze.length;
+
+    if (toAnalyze.length === 0) {
+      toast.info("Seçilen raporların AI analizi zaten güncel.");
+      return;
+    }
+
+    setBulkAnalyzing(true);
+    let succeeded = 0;
+    let failed = 0;
+    for (const report of toAnalyze) {
+      try {
+        await reportsService.runAiAnalysis(report.id);
+        succeeded++;
+      } catch (error) {
+        failed++;
+        console.error(`AI analizi başarısız oldu (rapor ${report.id}):`, error);
+      }
+    }
+
+    await refreshReports();
+    setBulkAnalyzing(false);
+    setSelectedIds([]);
+
+    const parts = [`${succeeded} rapor analiz edildi`];
+    if (alreadyFresh > 0) parts.push(`${alreadyFresh} rapor zaten güncel`);
+    if (failed > 0) parts.push(`${failed} rapor başarısız oldu`);
+    const message = `${parts.join(", ")}.`;
+    if (failed > 0) {
+      toast.warning(message);
+    } else {
+      toast.success(message);
+    }
+  }
+
   return (
     <div className="space-y-4">
       <Card>
@@ -322,6 +375,20 @@ export default function AdminPoolPage() {
             >
               Seçilenleri Ata
             </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={bulkAnalyzing}
+              onClick={handleBulkAnalyze}
+              className="gap-1.5 transition-transform active:scale-[0.97]"
+            >
+              {bulkAnalyzing ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Bot className="size-4" />
+              )}
+              {bulkAnalyzing ? "Analiz Ediliyor..." : "AI Analizini Başlat"}
+            </Button>
             <Button size="sm" variant="ghost" onClick={() => setSelectedIds([])}>
               Seçimi Temizle
             </Button>
@@ -341,6 +408,7 @@ export default function AdminPoolPage() {
                 <TableHead>Yarışmacı</TableHead>
                 <TableHead>Kategori</TableHead>
                 <TableHead>Durum</TableHead>
+                <TableHead>AI Analizi</TableHead>
                 <TableHead>Hakem</TableHead>
                 <TableHead>Tarih</TableHead>
               </TableRow>
@@ -348,7 +416,7 @@ export default function AdminPoolPage() {
             <TableBody>
               {filteredReports.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="py-10 text-center text-base text-muted-foreground">
+                  <TableCell colSpan={8} className="py-10 text-center text-base text-muted-foreground">
                     Filtrelerle eşleşen rapor bulunamadı.
                   </TableCell>
                 </TableRow>
@@ -363,6 +431,7 @@ export default function AdminPoolPage() {
                   const availableJudges = judgesForCategory(report.categoryId).filter(
                     (j) => !report.assignedJudgeIds.includes(j.id),
                   );
+                  const aiAnalysisStatus = getAiAnalysisStatus(report);
                   return (
                     <TableRow key={report.id}>
                       <TableCell>
@@ -399,6 +468,14 @@ export default function AdminPoolPage() {
                             </p>
                           )}
                         </div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant="outline"
+                          className={AI_ANALYSIS_STATUS_BADGE_CLASS[aiAnalysisStatus]}
+                        >
+                          {AI_ANALYSIS_STATUS_LABEL[aiAnalysisStatus]}
+                        </Badge>
                       </TableCell>
                       <TableCell>
                         <div className="flex flex-wrap items-center gap-1">

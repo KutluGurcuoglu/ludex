@@ -1,82 +1,10 @@
 import type {
   AIAnalysisResult,
+  AIEvaluationOutput,
   ComplianceCheckItem,
   CriterionAiEvaluation,
   CriticalSpecFinding,
-  Evidence,
 } from "@/types";
-
-/**
- * /api/reports/:id/evaluate gerçek AI pipeline'ının döndürdüğü şekil
- * (bkz. src/lib/ai-evaluation/schema.ts — buradan import etmek yerine
- * kopyalandı ki backend/frontend ayrımı net kalsın, bu yalnızca bir DTO).
- */
-interface RealEvaluationOutput {
-  languageAnalysis: {
-    detectedLanguage: string;
-    confidence: number; // 0-1
-    summary: string;
-    issues: string[];
-  };
-  specificationAnalysis: {
-    compliant: boolean;
-    findings: Array<{
-      ruleText: string;
-      findingText: string;
-      severity: "low" | "medium" | "high";
-      pageNumber?: number;
-      exactExcerpt?: string;
-    }>;
-    notes: string;
-  };
-  templateAnalysis: {
-    compliant: boolean;
-    missingSections: string[];
-    notes: string;
-  };
-  headingContentAnalysis: Array<{
-    sectionId: string;
-    headingPresent: boolean;
-    contentMatchesExpectation: boolean;
-    notes: string;
-    pageNumber?: number;
-    exactExcerpt?: string;
-  }>;
-  categoryFit: { fit: boolean; reason: string };
-  criteriaEvaluations: Array<{
-    criterionId: string;
-    score: number | null;
-    reason: string;
-    evidence?: string;
-    pageNumber?: number;
-    exactExcerpt?: string;
-    criterionLabel?: string;
-    criterionMaxScore?: number;
-  }>;
-  strengths: string[];
-  areasForImprovement: string[];
-  recommendations: string[];
-  /**
-   * Deterministik shingle/Jaccard benzerliğiyle hesaplanır (bkz.
-   * src/lib/ai-evaluation/similarity.ts) — LLM çıktısı değildir, ama aynı
-   * AI analiz kaydının parçası olarak API'den birlikte döner.
-   */
-  similarReports: Array<{
-    id: string;
-    reportLabel: string;
-    matchPercentage: number;
-    breakdown: Array<{
-      targetPage: number;
-      targetExcerpt: string;
-      matchedPage: number;
-      matchedExcerpt: string;
-    }>;
-  }>;
-  similarityScore?: number;
-  /** Sunucu tarafında doğrulanmış (gerçek sayfa metninde bulunan) kanıt alıntıları. */
-  evidences: Evidence[];
-  contextHash?: string;
-}
 
 /**
  * Gerçek AI çıktısını AIAnalysisResult şekline dönüştürür. Gerçek pipeline
@@ -87,8 +15,15 @@ interface RealEvaluationOutput {
  * değerlendirmesi ve benzerlik ise artık gerçek pipeline'ın ürettiği somut
  * verilerle doldurulur; sunucu tarafında doğrulanmamış hiçbir
  * pageNumber/exactExcerpt buraya kadar gelmez (bkz. postprocess.ts).
+ *
+ * Report.aiEvaluation üzerinden gelen, zaten sunucuda üretilmiş güncel bir
+ * sonucu göstermek için de kullanılır (bkz. evaluation-workspace.tsx) —
+ * böylece aynı dönüşüm mantığı iki yerde kopyalanmaz.
  */
-function toAIAnalysisResult(reportId: string, output: RealEvaluationOutput): AIAnalysisResult {
+export function toAIAnalysisResult(
+  reportId: string,
+  output: AIEvaluationOutput
+): AIAnalysisResult {
   const specCompliance: ComplianceCheckItem[] =
     output.specificationAnalysis.findings.length === 0
       ? [

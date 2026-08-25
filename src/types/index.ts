@@ -128,6 +128,81 @@ export interface AIContestantFeedback {
   recommendations: string[];
 }
 
+/**
+ * /api/reports/:id/evaluate gerçek AI pipeline'ının döndürdüğü ve
+ * Report.aiEvaluation olarak kalıcı saklanan şekil (bkz.
+ * src/lib/ai-evaluation/schema.ts — buradan import etmek yerine kasıtlı
+ * olarak kopyalanmıştır ki backend/frontend ayrımı net kalsın, bu yalnızca
+ * bir DTO'dur). src/services/ai-analysis.service.ts bu şekli
+ * AIAnalysisResult'a dönüştürür (bkz. toAIAnalysisResult).
+ */
+export interface AIEvaluationOutput {
+  languageAnalysis: {
+    detectedLanguage: string;
+    confidence: number; // 0-1
+    summary: string;
+    issues: string[];
+  };
+  specificationAnalysis: {
+    compliant: boolean;
+    findings: Array<{
+      ruleText: string;
+      findingText: string;
+      severity: "low" | "medium" | "high";
+      pageNumber?: number;
+      exactExcerpt?: string;
+    }>;
+    notes: string;
+  };
+  templateAnalysis: {
+    compliant: boolean;
+    missingSections: string[];
+    notes: string;
+  };
+  headingContentAnalysis: Array<{
+    sectionId: string;
+    headingPresent: boolean;
+    contentMatchesExpectation: boolean;
+    notes: string;
+    pageNumber?: number;
+    exactExcerpt?: string;
+  }>;
+  categoryFit: { fit: boolean; reason: string };
+  criteriaEvaluations: Array<{
+    criterionId: string;
+    score: number | null;
+    reason: string;
+    evidence?: string;
+    pageNumber?: number;
+    exactExcerpt?: string;
+    criterionLabel?: string;
+    criterionMaxScore?: number;
+  }>;
+  strengths: string[];
+  areasForImprovement: string[];
+  recommendations: string[];
+  /**
+   * Deterministik shingle/Jaccard benzerliğiyle hesaplanır (bkz.
+   * src/lib/ai-evaluation/similarity.ts) — LLM çıktısı değildir, ama aynı
+   * AI analiz kaydının parçası olarak API'den birlikte döner.
+   */
+  similarReports: Array<{
+    id: string;
+    reportLabel: string;
+    matchPercentage: number;
+    breakdown: Array<{
+      targetPage: number;
+      targetExcerpt: string;
+      matchedPage: number;
+      matchedExcerpt: string;
+    }>;
+  }>;
+  similarityScore?: number;
+  /** Sunucu tarafında doğrulanmış (gerçek sayfa metninde bulunan) kanıt alıntıları. */
+  evidences: Evidence[];
+  contextHash?: string;
+}
+
 export interface Report {
   id: string;
   title: string;
@@ -152,6 +227,13 @@ export interface Report {
    * yalnızca admin/hakem yanıtında bulunur, yarışmacıya asla dönmez.
    */
   aiAnalysisStale?: boolean;
+  /**
+   * Ludex AI'nın bu rapor için ürettiği en son ham analiz sonucu — yalnızca
+   * admin/hakem yanıtında bulunur (bkz. GET /api/reports), yarışmacıya asla
+   * dönmez. Güncelse (aiAnalysisStale === false) hakem ekranı Cloudflare
+   * AI'yı gereksiz yere tekrar çalıştırmadan doğrudan bunu kullanır.
+   */
+  aiEvaluation?: AIEvaluationOutput | null;
 }
 
 export type Severity = "low" | "medium" | "high";
