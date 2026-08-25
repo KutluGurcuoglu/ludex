@@ -22,7 +22,15 @@ export function resolveLocalStoragePath(key: string): string {
 }
 
 function getAppUrl(): string {
-  return process.env.APP_URL ?? "http://localhost:3000";
+  const raw = process.env.APP_URL?.trim();
+  if (!raw) return "http://localhost:3000";
+
+  try {
+    const parsed = new URL(raw);
+    return parsed.origin;
+  } catch {
+    throw new Error(`Invalid APP_URL: "${raw}"`);
+  }
 }
 
 /**
