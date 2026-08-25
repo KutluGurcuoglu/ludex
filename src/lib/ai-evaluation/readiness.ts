@@ -1,6 +1,6 @@
 import { getCategoryRepository, type CategoryRecord } from "@/lib/repositories/category-repository";
 import { getEffectiveCriteria } from "@/lib/repositories/score-criteria-repository";
-import { deriveTemplateSectionFromStorageKey } from "@/lib/text-extraction/report-template";
+import { deriveTemplateSectionsFromStorageKey } from "@/lib/text-extraction/report-template";
 import { computeContextHash } from "./context-hash";
 import type { ReportRecord } from "@/lib/repositories/report-repository";
 import type { ScoreCriterion } from "@/types";
@@ -8,9 +8,12 @@ import type { ScoreCriterion } from "@/types";
 /**
  * Kategorinin templateSections'ı boşsa ama daha önce gerçekten bir Rapor
  * Şablonu PDF'i yüklenmişse (ör. bu şablon, /api/categories/:id/report-template
- * bu türetmeyi eklemeden önce yüklenmiş eski bir kategoriyse), aynı
- * deterministik türetmeyi burada da dener ve kalıcı hale getirir — admin'in
- * şablonu yeniden yüklemesini beklemeye gerek kalmaz.
+ * bu AI bölüm analizini eklemeden önce yüklenmiş eski bir kategoriyse), aynı
+ * AI bölüm analizini burada da dener ve kalıcı hale getirir — admin'in
+ * şablonu yeniden yüklemesini beklemeye gerek kalmaz. Analiz başarısız olur
+ * veya hiç bölüm bulamazsa sessizce kategori değişmeden döner (sahte bir
+ * bölüm asla üretilmez); resolveReadiness bu durumu "missing_template" olarak
+ * ele alır.
  */
 export async function ensureTemplateSections(category: CategoryRecord): Promise<CategoryRecord> {
   if (category.templateSections.length > 0 || !category.reportTemplate?.fileUrl) {
@@ -18,8 +21,8 @@ export async function ensureTemplateSections(category: CategoryRecord): Promise<
   }
 
   try {
-    const section = await deriveTemplateSectionFromStorageKey(category.reportTemplate.fileUrl);
-    const updated = await getCategoryRepository().setTemplateSections(category.id, [section]);
+    const sections = await deriveTemplateSectionsFromStorageKey(category.reportTemplate.fileUrl);
+    const updated = await getCategoryRepository().setTemplateSections(category.id, sections);
     return updated ?? category;
   } catch (error) {
     console.error(`Rapor şablonu otomatik onarım hatası (kategori ${category.id}):`, error);

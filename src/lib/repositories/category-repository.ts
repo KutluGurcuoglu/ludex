@@ -34,12 +34,13 @@ export interface CategoryEvaluationCriterion {
 
 /**
  * Backend'e özgü kategori kaydı. `Category` (src/types) frontend'in gördüğü
- * şekildir; burada ek olarak admin'in elle girdiği, doğrudan evaluateReport()
- * çağrısına gidecek yapılandırılmış şablon bölümleri ve değerlendirme
- * kriterleri tutulur — bunlar admin panelinde ayrıca yazılır, yüklenen
- * şartname/şablon PDF'lerinden AI ile ÇIKARILMAZ (bkz. proje ekibiyle netleşen
- * akış: admin kriterleri ve bölümleri elle yazıyor, PDF'ler yalnızca referans
- * amaçlı yükleniyor).
+ * şekildir; burada ek olarak doğrudan evaluateReport() çağrısına gidecek
+ * yapılandırılmış şablon bölümleri ve değerlendirme kriterleri tutulur.
+ * `templateSections`, admin Rapor Şablonu PDF'i yüklediğinde
+ * ai-template-analysis altyapısıyla PDF metninden otomatik çıkarılır (bkz.
+ * deriveTemplateSectionsFromStorageKey). `evaluationCriteria` ise gerçek
+ * değerlendirme akışında kullanılmaz (bkz. Category.criteria +
+ * getEffectiveCriteria) — ayrı, şu an admin panelinde elle yazılan bir alan.
  */
 export interface CategoryRecord extends Category {
   templateSections: CategoryTemplateSection[];

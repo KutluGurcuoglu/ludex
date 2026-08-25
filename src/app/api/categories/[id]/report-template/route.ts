@@ -3,7 +3,11 @@ import { z } from "zod";
 import { requireRole } from "@/lib/auth/require-role";
 import { getCategoryRepository } from "@/lib/repositories/category-repository";
 import { getStorageProvider } from "@/lib/storage";
-import { deriveTemplateSectionFromStorageKey } from "@/lib/text-extraction/report-template";
+import {
+  deriveTemplateSectionsFromStorageKey,
+  NoTemplateSectionsFoundError,
+  TemplateTextExtractionError,
+} from "@/lib/text-extraction/report-template";
 
 const bodySchema = z.object({
   fileName: z.string().trim().min(1).max(255),
@@ -52,21 +56,40 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
   }
 
   // AI evaluate'in ihtiyaç duyduğu template.sections, admin panelinde ayrıca
-  // elle girilmiyor — yüklenen PDF'in gerçek metninden burada, yükleme anında
-  // deterministik olarak türetilip kalıcı hale getirilir (bkz.
-  // deriveTemplateSectionFromStorageKey). PDF okunamazsa şablon hiç
+  // elle girilmiyor — yüklenen PDF'in gerçek metninden, ai-template-analysis
+  // altyapısıyla şablondaki gerçek leaf/standalone rapor bölümlerine
+  // ayrıştırılıp kalıcı hale getirilir (bkz. deriveTemplateSectionsFromStorageKey).
+  // Metin çıkarılamazsa veya AI hiçbir bölüm bulamazsa şablon hiç
   // kaydedilmez; admin'e açık bir hata döner.
-  let templateSection: { title: string; expectedContent: string };
+  let templateSections: { title: string; expectedContent: string }[];
   try {
-    templateSection = await deriveTemplateSectionFromStorageKey(parsed.data.key);
+    templateSections = await deriveTemplateSectionsFromStorageKey(parsed.data.key);
   } catch (error) {
-    console.error(`Rapor şablonu metin çıkarma hatası (kategori ${id}):`, error);
+    console.error(`Rapor şablonu bölüm analizi hatası (kategori ${id}):`, error);
+    if (error instanceof TemplateTextExtractionError) {
+      return NextResponse.json(
+        {
+          error:
+            "Rapor şablonu PDF'ten metin çıkarılamadı (taranmış görüntü tabanlı bir PDF olabilir). Lütfen metin içeren bir PDF yükleyin.",
+        },
+        { status: 400 }
+      );
+    }
+    if (error instanceof NoTemplateSectionsFoundError) {
+      return NextResponse.json(
+        {
+          error:
+            "AI, yüklenen şablonda geçerli bir rapor bölümü yapısı bulamadı. Lütfen şablonun bölüm başlıklarını içerdiğinden emin olup tekrar yükleyin.",
+        },
+        { status: 400 }
+      );
+    }
     return NextResponse.json(
       {
         error:
-          "Rapor şablonu PDF'ten metin çıkarılamadı (taranmış görüntü tabanlı bir PDF olabilir). Lütfen metin içeren bir PDF yükleyin.",
+          "Rapor şablonu AI analizi başarısız oldu. Lütfen daha sonra tekrar deneyin veya sistem yöneticisiyle iletişime geçin.",
       },
-      { status: 400 }
+      { status: 502 }
     );
   }
 
@@ -81,7 +104,7 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
     return NextResponse.json({ error: "Kategori bulunamadı." }, { status: 404 });
   }
 
-  const updated = await categoryRepository.setTemplateSections(id, [templateSection]);
+  const updated = await categoryRepository.setTemplateSections(id, templateSections);
 
   // Yeni şablon başarıyla kaydedildi; eskisi artık hiçbir yerden referans
   // edilmiyor, R2/yerel depoda sonsuza dek birikmemesi için silinir.
