@@ -1,36 +1,78 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Ludex
 
-## Getting Started
+Ludex, TEKNOFEST değerlendirme süreçlerinde rapor ön kontrolü, yapay zekâ destekli analiz, kriter bazlı ön değerlendirme ve yarışmacı geri bildirimi sağlayan **human-in-the-loop karar destek sistemidir**.
 
-First, run the development server:
+> **AI nihai karar vermez; nihai karar hakemdedir.** Ludex AI, hakemin kendi değerlendirmesini yapmasına yardımcı olan bir ön analiz/karar desteği üretir — puanlama, eleme ve sonuç kararı her zaman hakeme aittir.
+
+## Problem 4 MVP Yetenekleri
+
+- Otomatik rapor dili tespiti
+- Güncel rapor şablonu uygunluk kontrolü
+- Zorunlu başlık ve içerik analizi
+- Kategori uygunluğu analizi
+- Başvurular arasında yüksek benzerlik tespiti
+- Kriter bazlı "AI 4. göz" değerlendirmesi
+- Kanıt/sayfa/alıntı doğrulama (AI'nın öne sürdüğü her alıntı, raporun gerçek metnine karşı sunucuda doğrulanır)
+- Güçlü yönler, geliştirilmesi gereken alanlar ve öneriler
+- Admin tarafından AI analiz sürecini başlatma/takip
+- Hakemin nihai değerlendirmesi
+- Değerlendirme yayınlandıktan sonra yarışmacı geri bildirimi
+
+## Roller
+
+| Rol | Internal değer | Açıklama |
+|---|---|---|
+| Yarışma & Değerlendirme Yöneticisi | `admin` | Kategori, şartname, rapor şablonu, kriter yönetimi; rapor havuzu, hakem ataması, AI analiz takibi |
+| Hakem / Değerlendirici | `judge` | Kendisine atanan raporları AI ön analizi eşliğinde inceler, nihai puanı ve kararı verir |
+| Yarışmacı | `contestant` | Rapor yükler; değerlendirme yayınlandıktan sonra geri bildirimini görür |
+
+> **Not:** MVP'de Yarışma Yöneticisi ve Değerlendirme Yöneticisi aynı `admin` yetki grubu altında konsolide edilmiştir.
+
+## Teknoloji Yığını
+
+- **Next.js 15** (App Router) · **React 19** · **TypeScript**
+- **Tailwind CSS v4**, Radix UI primitives, `lucide-react`
+- **Zustand** — istemci tarafı state
+- **NextAuth v5 (beta)** — Credentials provider, JWT session
+- **Prisma** + **PostgreSQL**
+- **Cloudflare Workers AI** — rapor değerlendirme ve şablon analizi (gerçek LLM çağrıları)
+- **Cloudflare R2** — dosya depolama (yerelde tanımlı değilse dosya sistemi tabanlı depolamaya düşer)
+- **LlamaParse** (opsiyonel) — PDF metin çıkarma (tanımlı değilse yerel `pdfjs-dist` tabanlı gerçek bir çıkarıcıya düşer)
+- **Vitest** — test, **ESLint** — lint
+- **Docker Compose** — yerel PostgreSQL + Mailpit altyapısı
+
+## Kurulum
 
 ```bash
+npm install        # veya: npm ci
+
+cp .env.example .env   # değerleri kendi ortamınıza göre düzenleyin
+
+npm run infra:up       # yerel PostgreSQL + Mailpit (Docker)
+
+npx prisma generate
+npx prisma migrate deploy
+npx prisma db seed
+
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Yerel Docker altyapısı hakkında ayrıntı için `docs/backend-development.md`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Test, Build, Lint
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm test
+npm run build
+npm run lint
+```
 
-## Learn More
+## Demo Girişi
 
-To learn more about Next.js, take a look at the following resources:
+Giriş ekranındaki Admin / Hakem / Yarışmacı tek-tık demo butonları, **gerçek NextAuth kimlik doğrulamasını** seed'lenmiş hesaplarla tetikler — mock oturum veya auth bypass değildir. Seed sonrası kullanılabilecek hesaplar (yalnızca yerel geliştirme verisidir, gerçek bir secret değildir):
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+| Rol | E-posta | Şifre |
+|---|---|---|
+| Yarışma & Değerlendirme Yöneticisi | `admin@ludex.com` | `demo1234` |
+| Hakem | `elif.yilmaz@ludex.com` | `demo1234` |
+| Yarışmacı | `mehmet.ozturk@example.com` | `demo1234` |

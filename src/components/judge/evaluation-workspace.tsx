@@ -468,7 +468,6 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
     } else {
       revealResults();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [analysisState, analysis, findingDecisions, gateFindings]);
 
   useEffect(() => {

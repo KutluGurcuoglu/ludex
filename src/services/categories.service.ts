@@ -1,4 +1,4 @@
-import { useAppStore, type AppState } from "@/store/useAppStore";
+import type { AppState } from "@/store/useAppStore";
 import type { Category, ScoreCriterion } from "@/types";
 
 export async function getCategories(): Promise<Category[]> {
