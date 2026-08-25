@@ -73,6 +73,9 @@ export async function POST(
     const evaluation = await evaluateReport({
       reportContent: toPageMarkedContent(report),
       category: category.name,
+      // Kategori uygunluğu (categoryFit) yalnızca kategori adına dayanmasın —
+      // admin bir açıklama girdiyse gerçek bağlamı da AI'ya verilir.
+      categoryDescription: category.description,
       specificationContent: category.specificationText ?? undefined,
       template: { sections: category.templateSections },
       evaluationCriteria: toAiCriteria(effectiveCriteria),

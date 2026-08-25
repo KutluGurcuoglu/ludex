@@ -22,6 +22,14 @@ export const reportTemplateSchema = z.object({
 export const evaluationInputSchema = z.object({
   reportContent: z.string().min(1),
   category: z.string().min(1),
+  /**
+   * Category.description — kategori uygunluğu değerlendirmesinin (categoryFit)
+   * yalnızca kategori adı tahminine değil, adminin girdiği gerçek kategori
+   * bağlamına dayanabilmesi için. Admin bir açıklama girmemişse boş bırakılır;
+   * bu durumda değerlendirme öncekiyle aynı şekilde yalnızca kategori adına
+   * göre yapılır.
+   */
+  categoryDescription: z.string().optional(),
   /** Yarışmanın güncel şartname PDF'inden çıkarılmış gerçek metni. Yüklenmemişse boş bırakılır. */
   specificationContent: z.string().optional(),
   template: reportTemplateSchema,

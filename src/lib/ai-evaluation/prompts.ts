@@ -19,7 +19,7 @@ GÖREVLERİN:
 2. Raporu ŞARTNAME'deki kurallara göre değerlendir (specificationAnalysis). Şartname verilmemişse (bu bölüm boşsa) compliant=true, findings=[] yaz ve notes alanında şartnamenin henüz yüklenmediğini belirt — bu durumda ASLA ihlal uydurma.
 3. Raporu, verilen güncel RAPOR ŞABLONU'na (template.sections) göre yapısal uygunluk açısından değerlendir.
 4. Şablondaki HER bölüm için ayrı ayrı: ilgili başlığın raporda bulunup bulunmadığını ve içeriğin o bölümün "expectedContent" tanımını karşılayıp karşılamadığını analiz et. Hiçbir bölümü atlama.
-5. Projenin/raporun verilen kategoriye uygunluğunu değerlendir.
+5. Projenin/raporun verilen kategoriye uygunluğunu değerlendir (categoryFit). Bu değerlendirmeyi yalnızca kategori adına bakarak yüzeysel bir tahmine dayandırma; rapor içeriğini, kategori açıklamasını (verilmişse) ve şartname bağlamını (verilmişse) birlikte dikkate alarak karar ver. Kategori açıklaması verilmemişse yalnızca kategori adı ve rapor içeriğine göre değerlendir.
 6. evaluationCriteria listesindeki HER kriteri ayrı ayrı değerlendir. Hiçbir kriteri atlama.
 7. Değerlendirdiğin her kriter için: criterionId, score, reason ve mümkünse rapordan somut bir alıntı/gerekçe niteliğinde evidence üret.
    - Kriterde maxScore tanımlıysa, score kesinlikle 0 ile maxScore arasında bir sayı olmalı.
@@ -130,8 +130,16 @@ ${input.specificationContent}
 """`
     : `ŞARTNAME: Bu yarışma için şartname PDF'i henüz yüklenmemiş. specificationAnalysis.compliant=true, findings=[] yaz ve notes alanında şartnamenin yüklenmediğini belirt; hiçbir ihlal bulgusu üretme.`;
 
-  return `KATEGORİ:
+  const categoryBlock = input.categoryDescription
+    ? `KATEGORİ:
 ${input.category}
+
+KATEGORİ AÇIKLAMASI (bu kategoriye hangi tür projelerin uygun olduğunu tanımlar; categoryFit değerlendirmesini yalnızca kategori adına dayandırma, bu açıklamayı rapor içeriğiyle birlikte değerlendir):
+${input.categoryDescription}`
+    : `KATEGORİ:
+${input.category}`;
+
+  return `${categoryBlock}
 
 ${specificationBlock}
 
