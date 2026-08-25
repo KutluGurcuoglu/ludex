@@ -97,7 +97,7 @@ export const STATUS_BADGE_CLASS: Record<ReportStatus, string> = {
 export const AI_ANALYSIS_STATUS_LABEL: Record<AiAnalysisStatus, string> = {
   pending: "Bekliyor",
   completed: "Tamamlandı",
-  stale: "Yeniden Analiz Gerekli",
+  stale: "Güncel Değil",
 };
 
 export const AI_ANALYSIS_STATUS_BADGE_CLASS: Record<AiAnalysisStatus, string> = {

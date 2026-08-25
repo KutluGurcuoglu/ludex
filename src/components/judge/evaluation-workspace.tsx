@@ -70,6 +70,11 @@ import { refreshReports, refreshEvaluations, refreshScoreCriteria } from "@/serv
 import * as aiAnalysisService from "@/services/ai-analysis.service";
 import * as copilotService from "@/services/copilot.service";
 import { buildHighlightQuery, highlightTextItem } from "@/lib/pdf-highlight";
+import {
+  computeAiPreliminaryScore,
+  computeOverallScoreDiff,
+  hasCompleteJudgeScore,
+} from "@/lib/ai-preliminary-score";
 import type {
   AIAnalysisResult,
   ComplianceCheckItem,
@@ -158,30 +163,47 @@ function ComplianceRow({
   );
 }
 
-/** Kriter bazlı AI değerlendirmesi satırı — ✅ puanlanmış / ⚠ ölçek tanımlı değil. */
+/**
+ * Kriter bazlı AI değerlendirmesi satırı — AI'nın puan ÖNERİSİni (nihai puan
+ * değil) ve gerekçesini açıkça gösterir. Hakem bu kriter için kendi puanını
+ * zaten girdiyse (judgeScore tanımlıysa), aradaki farkı da gösterir — ama
+ * hakem henüz dokunmadıysa (input hâlâ varsayılan 0 gösteriyor olsa da
+ * `scores` state'inde bu kriter için hiç kayıt yoksa) fark GÖSTERİLMEZ; bu
+ * karşılaştırma yalnızca hakemin fiilen girdiği bir puana dayanır.
+ */
 function CriterionEvaluationRow({
   item,
   analysis,
   onEvidence,
+  judgeScore,
 }: {
   item: CriterionAiEvaluation;
   analysis: AIAnalysisResult;
   onEvidence: (id: string) => void;
+  judgeScore?: number;
 }) {
+  const diff = judgeScore != null && item.score != null ? judgeScore - item.score : null;
+
   return (
     <div className="space-y-1 rounded-lg bg-muted/40 p-3">
       <div className="flex items-center justify-between gap-2">
         <p className="text-base font-medium">{item.label}</p>
         {item.score != null ? (
           <span className="text-base font-semibold text-primary">
-            {item.score}
+            AI önerisi: {item.score}
             {item.maxScore != null ? ` / ${item.maxScore}` : ""}
           </span>
         ) : (
-          <AlertTriangle className="size-4 shrink-0 text-amber-500" />
+          <span className="flex items-center gap-1 text-sm text-amber-600 dark:text-amber-400">
+            <AlertTriangle className="size-4 shrink-0" />
+            Puan ölçeği tanımlı değil
+          </span>
         )}
       </div>
-      <p className="text-base text-muted-foreground">{item.reason}</p>
+      <div>
+        <p className="text-sm font-medium text-muted-foreground">Gerekçe</p>
+        <p className="text-base text-muted-foreground">{item.reason}</p>
+      </div>
       {item.evidenceIds.map((eid) => (
         <Button
           key={eid}
@@ -194,6 +216,28 @@ function CriterionEvaluationRow({
           Neden? (Sayfa {analysis.evidences.find((e) => e.id === eid)?.page})
         </Button>
       ))}
+      {diff !== null && (
+        <div className="flex flex-wrap items-center gap-3 border-t border-border/60 pt-2 text-sm text-muted-foreground">
+          <span>
+            AI: {item.score} / {item.maxScore}
+          </span>
+          <span>
+            Hakem: {judgeScore} / {item.maxScore}
+          </span>
+          <span
+            className={
+              diff === 0
+                ? "text-muted-foreground"
+                : diff > 0
+                  ? "text-emerald-600 dark:text-emerald-400"
+                  : "text-red-600 dark:text-red-400"
+            }
+          >
+            Fark: {diff > 0 ? "+" : ""}
+            {diff}
+          </span>
+        </div>
+      )}
     </div>
   );
 }
@@ -379,8 +423,27 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
     [scoreCriteria, scores],
   );
 
-  const scoreDiff =
-    analysis?.suggestedScore != null ? totalScore - analysis.suggestedScore : null;
+  /**
+   * AI'ya ayrı bir totalScore ÜRETTİRİLMEZ — AI Ön Puanı, zaten üretilmiş
+   * criteriaEvaluations'daki kriter puanlarından burada deterministik olarak
+   * toplanır (bkz. computeAiPreliminaryScore). Bir kriterin puanı/ölçeği
+   * eksikse toplam sessizce 0 kabul edilmez; `incomplete` ile işaretlenir.
+   */
+  const aiPreliminaryScore = useMemo(
+    () =>
+      analysis
+        ? computeAiPreliminaryScore(
+            analysis.criteriaEvaluations.map((c) => ({ score: c.score, maxScore: c.maxScore })),
+          )
+        : null,
+    [analysis],
+  );
+
+  const scoreDiff = computeOverallScoreDiff(
+    aiPreliminaryScore,
+    hasCompleteJudgeScore(scoreCriteria, scores),
+    totalScore,
+  );
 
   const gateFindings = useMemo(
     () => (analysis ? buildGateFindings(analysis) : []),
@@ -1135,6 +1198,7 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
                                   item={c}
                                   analysis={analysis}
                                   onEvidence={jumpToEvidence}
+                                  judgeScore={scores[c.id]}
                                 />
                               ))}
                             </AccordionContent>
@@ -1268,33 +1332,50 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
                       </span>
                     </div>
 
-                    {analysis?.suggestedScore != null && (
-                      <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2 text-base">
-                        <span className="flex items-center gap-1.5 text-muted-foreground">
-                          <Sparkles className="size-3.5" />
-                          Ludex önerisi: {analysis.suggestedScore}
-                        </span>
-                        {scoreDiff !== null && (
-                          <span
-                            className={
-                              scoreDiff === 0
-                                ? "text-muted-foreground"
-                                : scoreDiff > 0
-                                  ? "text-emerald-600 dark:text-emerald-400"
-                                  : "text-red-600 dark:text-red-400"
-                            }
-                          >
-                            {scoreDiff > 0 ? "+" : ""}
-                            {scoreDiff} fark
+                    {aiPreliminaryScore && (
+                      <div className="rounded-lg border border-border px-3 py-2 text-base">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="flex items-center gap-1.5 text-muted-foreground">
+                            <Sparkles className="size-3.5" />
+                            AI Ön Puanı
                           </span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-lg font-bold text-primary">
+                              {aiPreliminaryScore.incomplete
+                                ? "Eksik"
+                                : `${aiPreliminaryScore.score} / ${aiPreliminaryScore.maxScore}`}
+                            </span>
+                            {scoreDiff !== null && (
+                              <span
+                                className={
+                                  scoreDiff === 0
+                                    ? "text-muted-foreground"
+                                    : scoreDiff > 0
+                                      ? "text-emerald-600 dark:text-emerald-400"
+                                      : "text-red-600 dark:text-red-400"
+                                }
+                              >
+                                {scoreDiff > 0 ? "+" : ""}
+                                {scoreDiff} fark
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        {aiPreliminaryScore.incomplete && (
+                          <p className="mt-1 text-sm text-amber-600 dark:text-amber-400">
+                            {aiPreliminaryScore.missingCount} kriter için puan ölçeği tanımlı değil.
+                          </p>
                         )}
+                        <p className="mt-1 text-sm italic text-muted-foreground">
+                          Bu puan karar desteği amaçlıdır. Nihai değerlendirme hakeme aittir.
+                        </p>
                       </div>
                     )}
 
                     {scoreDiff !== null && Math.abs(scoreDiff) >= 15 && (
                       <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-base text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300">
                         <ShieldAlert className="mt-0.5 size-3.5 shrink-0" />
-                        Ludex değerlendirmesi ile kendi değerlendirmen arasında anlamlı fark var.
+                        AI puan önerisi ile kendi değerlendirmen arasında anlamlı fark var.
                       </div>
                     )}
 

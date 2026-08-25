@@ -43,6 +43,7 @@ import { refreshReports } from "@/services/sync";
 import { ReportTimeline } from "@/components/report-timeline";
 import { aggregateEvaluations } from "@/lib/scoring";
 import { getAiAnalysisStatus } from "@/lib/ai-analysis-status";
+import { computeAiPreliminaryScore } from "@/lib/ai-preliminary-score";
 import type { ReportStatus } from "@/types";
 import {
   AI_ANALYSIS_STATUS_BADGE_CLASS,
@@ -53,6 +54,15 @@ import {
   STATUS_LABEL,
 } from "../_lib/shared";
 import type { User } from "@/types";
+
+/**
+ * "Analiz Ediliyor..." satır rozetinin sınıfı — bu, getAiAnalysisStatus()'un
+ * döndürdüğü kalıcı DB durumlarından (pending/completed/stale) bağımsız,
+ * yalnızca client-side geçici (transient) bir durumdur; DB'ye ANALYZING
+ * diye bir status eklenmez (bkz. handleBulkAnalyze/analyzingReportIds).
+ */
+const ANALYZING_BADGE_CLASS =
+  "border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-900 dark:bg-violet-950 dark:text-violet-300";
 
 /**
  * Hakem seçim menüsü — arama kutusu içerir. Radix Select'in "item-aligned" konumlandırması
@@ -143,6 +153,9 @@ export default function AdminPoolPage() {
   const [assigning, setAssigning] = useState(false);
   const [autoAssigning, setAutoAssigning] = useState(false);
   const [bulkAnalyzing, setBulkAnalyzing] = useState(false);
+  // Şu anda AI analizi çalışan raporların id'leri — tamamen client-side,
+  // transient bir set; DB'de karşılığı yoktur (bkz. ANALYZING_BADGE_CLASS).
+  const [analyzingReportIds, setAnalyzingReportIds] = useState<Set<string>>(new Set());
 
   const filteredReports = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -262,6 +275,15 @@ export default function AdminPoolPage() {
    * değil. Cloudflare'e gereksiz paralel yük bindirmemek için raporlar
    * sırayla (Promise.all değil) analiz edilir; bir rapor hata verse bile
    * batch tamamen bırakılmaz, kalan raporlar işlenmeye devam eder.
+   *
+   * Satır bazında canlı durum için: her raporun kendi id'si, o raporun
+   * isteği sürerken analyzingReportIds'e girer ve İSTEK BİTER BİTMEZ (başarı
+   * ya da hata, finally ile) çıkar — bir sonraki rapora geçmeden. Satırın
+   * "Tamamlandı"/"Güncel Değil" durumuna hemen geçebilmesi için de rapor
+   * listesi, batch'in tamamı bitince değil, HER rapor sonrası tazelenir.
+   * Bir raporun analizi başarısız olursa DB'deki mevcut kalıcı durumu
+   * bozulmadan kalır — yeni bir "error" DB durumu icat edilmez, hata
+   * yalnızca batch sonundaki toast ile bildirilir.
    */
   async function handleBulkAnalyze() {
     const selectedReports = reports.filter((r) => selectedIds.includes(r.id));
@@ -276,28 +298,60 @@ export default function AdminPoolPage() {
     setBulkAnalyzing(true);
     let succeeded = 0;
     let failed = 0;
-    for (const report of toAnalyze) {
-      try {
-        await reportsService.runAiAnalysis(report.id);
-        succeeded++;
-      } catch (error) {
-        failed++;
-        console.error(`AI analizi başarısız oldu (rapor ${report.id}):`, error);
+    try {
+      for (const report of toAnalyze) {
+        setAnalyzingReportIds((prev) => new Set(prev).add(report.id));
+        try {
+          try {
+            await reportsService.runAiAnalysis(report.id);
+            succeeded++;
+          } catch (error) {
+            failed++;
+            console.error(`AI analizi başarısız oldu (rapor ${report.id}):`, error);
+          }
+
+          // Bu raporun satırı, bir sonraki rapor başlamadan önce gerçek
+          // (başarılı/stale) durumunu göstermeli — bu yüzden yalnızca batch
+          // sonunda değil, her rapor sonrası tazeleniyor. Bir tazeleme
+          // başarısız olsa bile (ör. geçici ağ hatası) kalan raporların
+          // analizine devam edilir.
+          try {
+            await refreshReports();
+          } catch (error) {
+            console.error("Rapor listesi güncellenemedi:", error);
+          }
+        } finally {
+          // id, refreshReports denemesi bitene kadar analyzingReportIds'te
+          // kalır — aksi halde store henüz tazelenmeden "Analiz Ediliyor..."
+          // satırı "Bekliyor"a dönüp bir anlığına yanlış bir ara duruma
+          // (flash) düşer. Böylece satır doğrudan "Analiz Ediliyor..." →
+          // (refreshReports) → "Tamamlandı"/"Güncel Değil" akışını izler.
+          setAnalyzingReportIds((prev) => {
+            const next = new Set(prev);
+            next.delete(report.id);
+            return next;
+          });
+        }
       }
-    }
 
-    await refreshReports();
-    setBulkAnalyzing(false);
-    setSelectedIds([]);
+      setSelectedIds([]);
 
-    const parts = [`${succeeded} rapor analiz edildi`];
-    if (alreadyFresh > 0) parts.push(`${alreadyFresh} rapor zaten güncel`);
-    if (failed > 0) parts.push(`${failed} rapor başarısız oldu`);
-    const message = `${parts.join(", ")}.`;
-    if (failed > 0) {
-      toast.warning(message);
-    } else {
-      toast.success(message);
+      const parts = [`${succeeded} rapor analiz edildi`];
+      if (alreadyFresh > 0) parts.push(`${alreadyFresh} rapor zaten güncel`);
+      if (failed > 0) parts.push(`${failed} rapor başarısız oldu`);
+      const message = `${parts.join(", ")}.`;
+      if (failed > 0) {
+        toast.warning(message);
+      } else {
+        toast.success(message);
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Toplu analiz sırasında bir hata oluştu.");
+    } finally {
+      setBulkAnalyzing(false);
+      // Güvenlik ağı: yukarıdaki döngü beklenmedik şekilde kesilse bile
+      // analyzingReportIds'te hiçbir id asılı (orphan) kalmamalı.
+      setAnalyzingReportIds(new Set());
     }
   }
 
@@ -432,6 +486,20 @@ export default function AdminPoolPage() {
                     (j) => !report.assignedJudgeIds.includes(j.id),
                   );
                   const aiAnalysisStatus = getAiAnalysisStatus(report);
+                  const isAnalyzing = analyzingReportIds.has(report.id);
+                  // Puan özeti yalnızca güncel ve tamamlanmış bir analiz
+                  // varken gösterilir — stale ("Güncel Değil") durumda eski
+                  // puan güncelmiş gibi gösterilmez, analiz sürerken de
+                  // henüz bitmemiş bir sonuç yokmuş gibi puan gösterilmez.
+                  const aiPreliminaryScore =
+                    !isAnalyzing && aiAnalysisStatus === "completed" && report.aiEvaluation
+                      ? computeAiPreliminaryScore(
+                          report.aiEvaluation.criteriaEvaluations.map((c) => ({
+                            score: c.score,
+                            maxScore: c.criterionMaxScore,
+                          })),
+                        )
+                      : null;
                   return (
                     <TableRow key={report.id}>
                       <TableCell>
@@ -470,12 +538,28 @@ export default function AdminPoolPage() {
                         </div>
                       </TableCell>
                       <TableCell>
-                        <Badge
-                          variant="outline"
-                          className={AI_ANALYSIS_STATUS_BADGE_CLASS[aiAnalysisStatus]}
-                        >
-                          {AI_ANALYSIS_STATUS_LABEL[aiAnalysisStatus]}
-                        </Badge>
+                        <div className="space-y-1">
+                          {isAnalyzing ? (
+                            <Badge variant="outline" className={`gap-1 ${ANALYZING_BADGE_CLASS}`}>
+                              <Loader2 className="size-3 animate-spin" />
+                              Analiz Ediliyor...
+                            </Badge>
+                          ) : (
+                            <Badge
+                              variant="outline"
+                              className={AI_ANALYSIS_STATUS_BADGE_CLASS[aiAnalysisStatus]}
+                            >
+                              {AI_ANALYSIS_STATUS_LABEL[aiAnalysisStatus]}
+                            </Badge>
+                          )}
+                          {aiPreliminaryScore && (
+                            <p className="text-xs text-muted-foreground">
+                              {aiPreliminaryScore.incomplete
+                                ? "AI Ön Puanı: Eksik"
+                                : `AI Ön Puanı: ${aiPreliminaryScore.score} / ${aiPreliminaryScore.maxScore}`}
+                            </p>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell>
                         <div className="flex flex-wrap items-center gap-1">

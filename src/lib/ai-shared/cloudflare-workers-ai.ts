@@ -1,5 +1,13 @@
 const DEFAULT_MODEL = "@cf/openai/gpt-oss-20b";
 
+// Cloudflare Workers AI bazen (ör. büyük bir reasoning çağrısında) yanıt
+// vermeden bağlantıyı süresiz açık bırakabiliyor — fetch()'in kendisinde
+// varsayılan bir timeout yoktur, bu yüzden istek hiç bitmeden sonsuza kadar
+// beklerdi (bkz. demo E2E'de gözlenen "sonsuz analiz ediliyor" blocker'ı).
+// 90 saniye, gerçek bir full report evaluation çağrısı için gerçekçi ama
+// sunumda sonsuz spinner'a düşmeyecek bir üst sınırdır.
+const DEFAULT_TIMEOUT_MS = 90_000;
+
 interface CloudflareAiRunResponse {
   success: boolean;
   errors?: { code: number; message: string }[];
@@ -10,6 +18,8 @@ export type CloudflareStructuredJsonOptions = {
   maxTokens?: number;
   model?: string;
   temperature?: number;
+  /** İstek bu süreyi (ms) aşarsa iptal edilir; varsayılan DEFAULT_TIMEOUT_MS'dir (test amaçlı geçersiz kılınabilir). */
+  timeoutMs?: number;
 };
 
 export async function fetchCloudflareStructuredJson(
@@ -30,30 +40,42 @@ export async function fetchCloudflareStructuredJson(
   const model = options?.model ?? DEFAULT_MODEL;
   const endpoint = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/${model}`;
 
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiToken}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
-      ],
-      // gpt-oss-20b bir "reasoning" modeli: yanıtlamadan önce dahili muhakeme
-      // (reasoning_content) için de bu bütçeyi kullanır. Gerçek rapor
-      // değerlendirmesi gibi çok alanlı/uzun JSON çıktısı gereken çağrılarda
-      // 4096 genellikle muhakemeye harcanıp asıl içerik hiç üretilmeden
-      // bitiyordu (bkz. E2E'de gözlenen "message.content is missing" hatası).
-      max_tokens: options?.maxTokens ?? 16384,
-      temperature: options?.temperature ?? 0.2,
-      response_format: {
-        type: "json_schema",
-        json_schema: jsonSchema,
+  let response: Response;
+  try {
+    response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiToken}`,
+        "Content-Type": "application/json",
       },
-    }),
-  });
+      body: JSON.stringify({
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        // gpt-oss-20b bir "reasoning" modeli: yanıtlamadan önce dahili muhakeme
+        // (reasoning_content) için de bu bütçeyi kullanır. Gerçek rapor
+        // değerlendirmesi gibi çok alanlı/uzun JSON çıktısı gereken çağrılarda
+        // 4096 genellikle muhakemeye harcanıp asıl içerik hiç üretilmeden
+        // bitiyordu (bkz. E2E'de gözlenen "message.content is missing" hatası).
+        max_tokens: options?.maxTokens ?? 16384,
+        temperature: options?.temperature ?? 0.2,
+        response_format: {
+          type: "json_schema",
+          json_schema: jsonSchema,
+        },
+      }),
+      signal: AbortSignal.timeout(options?.timeoutMs ?? DEFAULT_TIMEOUT_MS),
+    });
+  } catch (error) {
+    // AbortSignal.timeout() süresi dolduğunda fetch, name="TimeoutError" olan
+    // bir DOMException ile reject olur (kullanıcı kaynaklı iptal - "AbortError" -
+    // ile karıştırılmamalı; burada yalnızca zaman aşımı senaryosu var).
+    if (error instanceof Error && error.name === "TimeoutError") {
+      throw new Error("Cloudflare Workers AI request timed out.");
+    }
+    throw error;
+  }
 
   const body: CloudflareAiRunResponse = await response.json();
 
