@@ -1,3 +1,4 @@
+import { normalizeSpecificationAnalysis } from "@/lib/specification-compliance";
 import type {
   AIAnalysisResult,
   AIEvaluationOutput,
@@ -19,23 +20,37 @@ import type {
  * Report.aiEvaluation üzerinden gelen, zaten sunucuda üretilmiş güncel bir
  * sonucu göstermek için de kullanılır (bkz. evaluation-workspace.tsx) —
  * böylece aynı dönüşüm mantığı iki yerde kopyalanmaz.
+ *
+ * hasSpecification: kategori şu an gerçekten bir şartname metni içeriyor mu.
+ * false ise specificationAnalysis, çağıranın (fresh POST yanıtı ya da DB'de
+ * önceden kaydedilmiş eski bir cache satırı) ne getirdiğinden bağımsız
+ * olarak normalizeSpecificationAnalysis ile güvenli/nötr bir sonuca
+ * sabitlenir — böylece admin şartname yüklememişken AI'nın (ya da bu
+ * düzeltmeden önce üretilmiş eski bir kayıtta donmuş) uydurma bir ihlal
+ * bulgusu asla hakeme gösterilmez.
  */
 export function toAIAnalysisResult(
   reportId: string,
-  output: AIEvaluationOutput
+  output: AIEvaluationOutput,
+  hasSpecification: boolean
 ): AIAnalysisResult {
+  const specificationAnalysis = normalizeSpecificationAnalysis(
+    output.specificationAnalysis,
+    hasSpecification
+  );
+
   const specCompliance: ComplianceCheckItem[] =
-    output.specificationAnalysis.findings.length === 0
+    specificationAnalysis.findings.length === 0
       ? [
           {
             id: "specification",
             label: "Şartname Uygunluğu",
-            passed: output.specificationAnalysis.compliant,
-            detail: output.specificationAnalysis.notes,
+            passed: specificationAnalysis.compliant,
+            detail: specificationAnalysis.notes,
             evidenceIds: [],
           },
         ]
-      : output.specificationAnalysis.findings.map((finding, index) => {
+      : specificationAnalysis.findings.map((finding, index) => {
           const id = `spec-${index}`;
           const hasEvidence = Boolean(finding.pageNumber && finding.exactExcerpt);
           return {
@@ -49,7 +64,7 @@ export function toAIAnalysisResult(
           };
         });
 
-  const criticalFindings: CriticalSpecFinding[] = output.specificationAnalysis.findings
+  const criticalFindings: CriticalSpecFinding[] = specificationAnalysis.findings
     .map((finding, index) => ({ finding, index }))
     .filter(({ finding }) => finding.severity === "high")
     .map(({ finding, index }) => ({
@@ -128,12 +143,15 @@ export function toAIAnalysisResult(
   };
 }
 
-export async function getAIAnalysis(reportId: string): Promise<AIAnalysisResult> {
+export async function getAIAnalysis(
+  reportId: string,
+  hasSpecification: boolean
+): Promise<AIAnalysisResult> {
   const res = await fetch(`/api/reports/${reportId}/evaluate`, { method: "POST" });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     throw new Error(data.error ?? "AI analizi alınamadı.");
   }
 
-  return toAIAnalysisResult(reportId, data.evaluation);
+  return toAIAnalysisResult(reportId, data.evaluation, hasSpecification);
 }

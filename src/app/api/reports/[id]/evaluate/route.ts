@@ -10,6 +10,7 @@ import { attachVerifiedEvidence } from "@/lib/ai-evaluation/postprocess";
 import { computeContextHash } from "@/lib/ai-evaluation/context-hash";
 import { resolveReadiness } from "@/lib/ai-evaluation/readiness";
 import { toPageMarkedContent } from "@/lib/ai-evaluation/report-content";
+import { normalizeSpecificationAnalysis } from "@/lib/specification-compliance";
 import type { ScoreCriterion } from "@/types";
 
 /** Hakemin puanladığı efektif kriterleri (kategoriye özel ya da global), AI'nın beklediği şekle çevirir. */
@@ -69,6 +70,8 @@ export async function POST(
   // yalnızca salt-okunur ekranlar — Copilot, hakem uyarısı — için bir sinyaldir).
   const { category, effectiveCriteria } = readiness;
 
+  const hasSpecification = Boolean(category.specificationText?.trim());
+
   try {
     const evaluation = await evaluateReport({
       reportContent: toPageMarkedContent(report),
@@ -80,6 +83,16 @@ export async function POST(
       template: { sections: category.templateSections },
       evaluationCriteria: toAiCriteria(effectiveCriteria),
     });
+
+    // Şartname yüklenmemişse, AI prompt'a "ihlal uydurma" talimatı verilmiş
+    // olsa da bu bir garanti değildir — sunucu tarafı invariant: şartname
+    // yoksa AI ne döndürürse döndürsün specificationAnalysis güvenli/nötr
+    // bir sonuca sabitlenir (persistence'tan ÖNCE). Admin şartname
+    // yüklemediği için yarışmacı bu yüzden asla "ihlal etmiş" sayılamaz.
+    evaluation.specificationAnalysis = normalizeSpecificationAnalysis(
+      evaluation.specificationAnalysis,
+      hasSpecification
+    );
 
     // Sunucu, AI'nın söylediği pageNumber/exactExcerpt'e körü körüne
     // güvenmez — her iddiayı raporun gerçek sayfa metnine karşı doğrular ve

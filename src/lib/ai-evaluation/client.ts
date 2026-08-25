@@ -10,12 +10,23 @@ export async function callAiEvaluation(
     systemPrompt,
     userPrompt,
     z.toJSONSchema(evaluationOutputSchema),
-    // Problem 4 ile şema büyüdü (specificationAnalysis, sayfa/alıntı alanları,
-    // evidences) — gpt-oss-20b bir "reasoning" modeli olduğu için önce dahili
-    // reasoning_content üretip token bütçesini tüketiyor, asıl JSON içerik
-    // ondan SONRA geliyor. 16384'ün bu daha büyük şema için yetersiz kaldığı
-    // gözlemlendi ("message.content is missing" hatası) — üst sınırı yükseltiyoruz.
-    { maxTokens: 32768 }
+    // Demo E2E'de gerçek full evaluation ~75 saniye sürdü — gpt-oss-20b bir
+    // "reasoning" modeli olduğu için yanıtlamadan önce dahili muhakeme
+    // (reasoning_content) üretip max_tokens bütçesinin büyük kısmını
+    // tüketiyordu (bu yüzden önceden 32768'e çıkarılmıştı). llama-3.1-8b-
+    // instruct-fast bir reasoning modeli DEĞİLDİR — gizli bir muhakeme
+    // aşaması yok, max_tokens'ın tamamı doğrudan görünür JSON çıktısına
+    // gidiyor ve model daha küçük/hızlı olduğu için yanıt süresi de kısalıyor.
+    //
+    // 8192, mevcut şema için gerçekçi bir üst sınırdır: tipik bir demo
+    // senaryosunda (4 kriter, ~10-15 şablon bölümü, 0-birkaç şartname
+    // bulgusu) beklenen JSON çıktısı bunun çok altında kalır — her
+    // criteriaEvaluations/headingContentAnalysis/specificationAnalysis.
+    // findings öğesi kısa (reason/notes birkaç cümle, evidence/exactExcerpt
+    // tek bir alıntı) olduğundan, hiçbir alan kesilmeden (kriterler, şablon
+    // bölümleri, bulgular, strengths/areasForImprovement/recommendations
+    // dahil) tamamı için yeterli alan bırakır.
+    { model: "@cf/meta/llama-3.1-8b-instruct-fast", maxTokens: 8192 }
   );
 
   const parsedOutput = evaluationOutputSchema.safeParse(rawOutput);

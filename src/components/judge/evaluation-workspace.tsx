@@ -334,6 +334,12 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
 
   const category = categories.find((c) => c.id === report?.categoryId) ?? null;
   const scoreCriteria = getEffectiveCriteria(category, globalScoreCriteria);
+  // category.specification (dosya metadata'sı) admin bir şartname
+  // yüklediğinde category.specificationText (gerçek metin) ile birlikte
+  // atomik olarak set edilir (bkz. PUT /api/categories/[id]/specification)
+  // — bu yüzden frontend'e specificationText'in kendisini hiç göndermeden
+  // güvenilir bir "şartname var mı" sinyali olarak kullanılabilir.
+  const hasSpecification = Boolean(category?.specification);
 
   const [isLoading, setIsLoading] = useState(true);
   const [analysisState, setAnalysisState] = useState<AnalysisState>("idle");
@@ -508,7 +514,7 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
 
     let result: AIAnalysisResult;
     try {
-      result = await aiAnalysisService.getAIAnalysis(reportId);
+      result = await aiAnalysisService.getAIAnalysis(reportId, hasSpecification);
     } catch (error) {
       setAnalysisState("error");
       setAnalysisError(error instanceof Error ? error.message : "AI analizi başlatılamadı.");
@@ -543,9 +549,11 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
     if (isLoading || analysisState !== "idle" || analysis) return;
     if (!report?.aiEvaluation || report.aiAnalysisStale) return;
 
-    applyAnalysisResult(aiAnalysisService.toAIAnalysisResult(reportId, report.aiEvaluation));
+    applyAnalysisResult(
+      aiAnalysisService.toAIAnalysisResult(reportId, report.aiEvaluation, hasSpecification),
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoading, analysisState, analysis, reportId, report?.aiEvaluation, report?.aiAnalysisStale]);
+  }, [isLoading, analysisState, analysis, reportId, report?.aiEvaluation, report?.aiAnalysisStale, hasSpecification]);
 
   useEffect(() => {
     // Admin şartname/şablon/kriterleri bu raporun daha önceki AIAnalysis'i
@@ -889,8 +897,9 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
 
                     {analysisState === "awaiting-decision" && (
                       <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-base text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300">
-                        Şartname ve dil denetimi tamamlandı. Kalan analiz aşamalarına geçmeden önce
-                        aşağıdaki bulgu(lar) için karar ver.
+                        {hasSpecification
+                          ? "Şartname ve dil denetimi tamamlandı. Kalan analiz aşamalarına geçmeden önce aşağıdaki bulgu(lar) için karar ver."
+                          : "Dil denetimi tamamlandı. Bu kategori için şartname yüklenmediğinden şartname kontrolü atlandı. Kalan analiz aşamalarına geçmeden önce aşağıdaki bulgu(lar) için karar ver."}
                       </p>
                     )}
 
@@ -1053,15 +1062,22 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
                               Aşama 2 – Şartname Denetimi
                             </AccordionTrigger>
                             <AccordionContent className="space-y-2">
-                              {analysis.specCompliance.map((item) => (
-                                <ComplianceRow
-                                  key={item.id}
-                                  item={item}
-                                  analysis={analysis}
-                                  onEvidence={jumpToEvidence}
-                                compact={compactCompliance}
-                                />
-                              ))}
+                              {hasSpecification ? (
+                                analysis.specCompliance.map((item) => (
+                                  <ComplianceRow
+                                    key={item.id}
+                                    item={item}
+                                    analysis={analysis}
+                                    onEvidence={jumpToEvidence}
+                                  compact={compactCompliance}
+                                  />
+                                ))
+                              ) : (
+                                <p className="text-base text-muted-foreground">
+                                  Bu kategori için şartname yüklenmediğinden şartname uygunluğu
+                                  kontrolü yapılmadı.
+                                </p>
+                              )}
                             </AccordionContent>
                           </AccordionItem>
 
