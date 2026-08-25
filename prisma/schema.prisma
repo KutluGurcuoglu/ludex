@@ -50,16 +50,23 @@ enum OutboxStatus {
 }
 
 model User {
-  id                  String             @id @default(uuid())
-  email               String             @unique
-  passwordHash        String
-  fullName            String
-  phone               String
-  role                Role               @default(CONTESTANT)
-  judgeApprovalStatus ApplicationStatus?
-  judgeWorkStatus     JudgeWorkStatus?
-  createdAt           DateTime           @default(now())
-  updatedAt           DateTime           @updatedAt
+  id                       String             @id @default(uuid())
+  email                    String             @unique
+  passwordHash             String
+  fullName                 String
+  phone                    String
+  role                     Role               @default(CONTESTANT)
+  judgeApprovalStatus      ApplicationStatus?
+  judgeWorkStatus          JudgeWorkStatus?
+  jobTitle                 String?
+  department               String?
+  expertiseArea            String?
+  academicProfileUrl       String?
+  cvFileName               String?
+  customExpertiseTags      String[]           @default([])
+  judgeAgreementAcceptedAt DateTime?
+  createdAt                DateTime           @default(now())
+  updatedAt                DateTime           @updatedAt
 
   sessions            Session[]
   passwordResetTokens PasswordResetToken[]

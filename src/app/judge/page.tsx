@@ -334,19 +334,24 @@ function JudgeApplicationForm({ user, categories }: { user: User; categories: Ca
     }
 
     setSubmitting(true);
-    await usersService.submitJudgeApplication(user.id, {
-      categoryIds: selectedIds,
-      workStatus,
-      jobTitle: jobTitle.trim(),
-      department: institution.trim(),
-      expertiseArea: expertiseArea.trim() || undefined,
-      academicProfileUrl: academicProfileUrl.trim() || undefined,
-      cvFileName: cvFile?.name,
-      customExpertiseTags: customTags,
-      agreementAccepted: true,
-    });
-    setSubmitting(false);
-    toast.success("Başvurun gönderildi, admin onayını bekliyor.");
+    try {
+      await usersService.submitJudgeApplication(user.id, {
+        categoryIds: selectedIds,
+        workStatus,
+        jobTitle: jobTitle.trim(),
+        department: institution.trim(),
+        expertiseArea: expertiseArea.trim() || undefined,
+        academicProfileUrl: academicProfileUrl.trim() || undefined,
+        cvFileName: cvFile?.name,
+        customExpertiseTags: customTags,
+        agreementAccepted: true,
+      });
+      toast.success("Başvurun gönderildi, admin onayını bekliyor.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Başvuru gönderilemedi.");
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (

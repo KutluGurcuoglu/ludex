@@ -39,10 +39,17 @@ export async function changePassword(
   return simulateNetworkDelay(result);
 }
 
-export function submitJudgeApplication(
+export async function submitJudgeApplication(
   userId: string,
   input: Parameters<AppState["submitJudgeApplication"]>[1],
 ): Promise<void> {
-  useAppStore.getState().submitJudgeApplication(userId, input);
-  return simulateNetworkDelay(undefined);
+  // userId gönderilmez — sunucu, self-servis olduğu için yalnızca gerçek
+  // oturumun kendi kimliğine güvenir (bkz. /api/judges/application).
+  const res = await fetch("/api/judges/application", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error ?? "Başvuru gönderilemedi.");
 }
