@@ -75,6 +75,7 @@ import {
   computeOverallScoreDiff,
   hasCompleteJudgeScore,
 } from "@/lib/ai-preliminary-score";
+import { buildGateFindings, type GateFinding } from "@/lib/gate-findings";
 import type {
   AIAnalysisResult,
   ComplianceCheckItem,
@@ -267,62 +268,6 @@ const ANALYSIS_CHECK_LABELS = [
   "Benzerlik analizi",
   "Kriter bazlı AI değerlendirmesi",
 ];
-
-type GateFindingKind = "critical" | "language" | "spec";
-
-interface GateFinding {
-  id: string;
-  kind: GateFindingKind;
-  title: string;
-  ruleText: string;
-  findingText: string;
-  probability: Severity;
-  evidenceId: string | null;
-}
-
-/**
- * Hakemin karar vermeden geçemeyeceği tüm bulgular: kritik şartname bulguları,
- * dil denetimi başarısızlığı ve genel şartname (specCompliance) ihlalleri.
- */
-function buildGateFindings(analysis: AIAnalysisResult): GateFinding[] {
-  const findings: GateFinding[] = analysis.criticalFindings.map((f) => ({
-    id: f.id,
-    kind: "critical",
-    title: "KRİTİK ŞARTNAME BULGUSU",
-    ruleText: f.ruleText,
-    findingText: f.findingText,
-    probability: f.probability,
-    evidenceId: f.evidenceId,
-  }));
-
-  if (!analysis.languageCheck.passed) {
-    findings.push({
-      id: "language-check",
-      kind: "language",
-      title: "DİL DENETİMİ UYARISI",
-      ruleText: `Rapor, şartnamede belirtilen ${analysis.languageCheck.expectedLanguage} dilinde yazılmalıdır.`,
-      findingText: `Tespit edilen dil: ${analysis.languageCheck.detectedLanguage} (güven: %${analysis.languageCheck.confidence})`,
-      probability: analysis.languageCheck.confidence >= 80 ? "high" : "medium",
-      evidenceId: null,
-    });
-  }
-
-  analysis.specCompliance
-    .filter((item) => !item.passed)
-    .forEach((item) => {
-      findings.push({
-        id: item.id,
-        kind: "spec",
-        title: "ŞARTNAMEYE AYKIRI DURUM",
-        ruleText: item.label,
-        findingText: item.detail,
-        probability: "medium",
-        evidenceId: item.evidenceIds[0] ?? null,
-      });
-    });
-
-  return findings;
-}
 
 export function EvaluationWorkspace({ reportId }: { reportId: string }) {
   const router = useRouter();
