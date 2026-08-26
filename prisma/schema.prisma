@@ -178,6 +178,7 @@ model Report {
   judgeEvaluations JudgeEvaluation[]
 
   @@index([contestantId])
+  @@unique([contestantId, categoryId])
 }
 
 model ReportJudgeAssignment {
