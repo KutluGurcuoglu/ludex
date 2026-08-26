@@ -98,7 +98,8 @@ export async function POST(
     // yüklemediği için yarışmacı bu yüzden asla "ihlal etmiş" sayılamaz.
     evaluation.specificationAnalysis = normalizeSpecificationAnalysis(
       evaluation.specificationAnalysis,
-      hasSpecification
+      hasSpecification,
+      evaluation.languageAnalysis
     );
 
     // Sunucu, AI'nın söylediği pageNumber/exactExcerpt'e körü körüne

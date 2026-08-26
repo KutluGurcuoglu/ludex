@@ -36,7 +36,8 @@ export function toAIAnalysisResult(
 ): AIAnalysisResult {
   const specificationAnalysis = normalizeSpecificationAnalysis(
     output.specificationAnalysis,
-    hasSpecification
+    hasSpecification,
+    output.languageAnalysis
   );
 
   const specCompliance: ComplianceCheckItem[] =
