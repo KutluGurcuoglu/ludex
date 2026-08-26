@@ -8,6 +8,7 @@ import {
   getScoreCriteriaRepository,
   getEffectiveCriteria,
 } from "@/lib/repositories/score-criteria-repository";
+import { notifyEvaluationCompleted, shouldNotifyEvaluationCompleted } from "@/lib/notification-delivery";
 
 const criterionScoreSchema = z.object({
   criterionId: z.string().min(1),
@@ -93,6 +94,7 @@ export async function POST(
     : null;
 
   const evaluationRepository = getEvaluationRepository();
+  const previousEvaluation = await evaluationRepository.findByReportAndJudge(id, session.user.id);
   const evaluation = await evaluationRepository.upsert(id, session.user.id, {
     criteriaScores: parsed.data.criteriaScores,
     overallComment: parsed.data.overallComment,
@@ -103,6 +105,10 @@ export async function POST(
   const allEvaluations = await evaluationRepository.listByReport(id);
   const newStatus = deriveReportStatus(report.assignedJudgeIds, allEvaluations);
   await reportRepository.setStatus(id, newStatus);
+
+  if (shouldNotifyEvaluationCompleted(previousEvaluation?.status, parsed.data.status)) {
+    await notifyEvaluationCompleted({ reportId: id, reportTitle: report.title });
+  }
 
   return NextResponse.json({ success: true, evaluation, reportStatus: newStatus }, { status: 201 });
 }

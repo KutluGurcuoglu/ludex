@@ -3,6 +3,7 @@ import { requireRole } from "@/lib/auth/require-role";
 import { getCategoryRepository } from "@/lib/repositories/category-repository";
 import { getReportRepository } from "@/lib/repositories/report-repository";
 import { getEvaluationRepository } from "@/lib/repositories/evaluation-repository";
+import { notifyEvaluationApproved } from "@/lib/notification-delivery";
 
 /**
  * Bu kategorideki, hakemin tamamladığı ama admin'in henüz yayınlamadığı
@@ -36,7 +37,18 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     (e) => reportIdsInCategory.has(e.reportId) && e.status === "submitted" && !e.visibleToContestant
   );
 
-  await Promise.all(pending.map((e) => evaluationRepository.setVisibleToContestant(e.id, true)));
+  await Promise.all(pending.map(async (e) => {
+    const report = await reportRepository.findById(e.reportId);
+    await evaluationRepository.setVisibleToContestant(e.id, true);
+    if (report) {
+      await notifyEvaluationApproved({
+        reportId: report.id,
+        reportTitle: report.title,
+        contestantId: report.contestantId,
+        judgeId: e.judgeId,
+      });
+    }
+  }));
   const updatedCategory = await getCategoryRepository().markResultsReleased(id);
 
   return NextResponse.json({
