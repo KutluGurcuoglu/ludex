@@ -374,6 +374,7 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
     finding: GateFinding;
     decision: "flagged" | "dismissed";
   } | null>(null);
+  const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
 
   const [messages, setMessages] = useState<CopilotChatMessage[]>([
     {
@@ -617,7 +618,30 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
     setScores((prev) => ({ ...prev, [criterionId]: value }));
   }
 
-  async function persistEvaluation(status: "draft" | "submitted") {
+  const hasUnsavedProgress =
+    existingEvaluation?.status !== "submitted" &&
+    (overallComment.trim() !== (existingEvaluation?.overallComment ?? "").trim() ||
+      scoreCriteria.some((criterion) => {
+        const savedScore =
+          existingEvaluation?.criteriaScores.find((cs) => cs.criterionId === criterion.id)?.score ?? 0;
+        return (scores[criterion.id] ?? 0) !== savedScore;
+      }) ||
+      JSON.stringify(disqualification) !==
+        JSON.stringify(existingEvaluation?.disqualificationRecommendation ?? null) ||
+      Object.values(findingDecisions).some((decision) => decision === "dismissed"));
+
+  function handleBackToPanel() {
+    if (hasUnsavedProgress) {
+      setLeaveConfirmOpen(true);
+      return;
+    }
+    router.push("/judge");
+  }
+
+  async function persistEvaluation(
+    status: "draft" | "submitted",
+    options?: { navigateAfter?: boolean },
+  ) {
     if (!user || !report) return;
     setSaving(true);
 
@@ -642,7 +666,7 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
       // disqualified) sunucuda otomatik türetiliyor — ikisini de tazelemek gerekir.
       await Promise.all([refreshEvaluations(), refreshReports()]);
       toast.success(status === "draft" ? "Taslak kaydedildi." : "Değerlendirme tamamlandı.");
-      if (status === "submitted") {
+      if (status === "submitted" || options?.navigateAfter) {
         router.push("/judge");
       }
     } catch (error) {
@@ -650,6 +674,16 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
     } finally {
       setSaving(false);
     }
+  }
+
+  async function handleSaveDraftAndLeave() {
+    setLeaveConfirmOpen(false);
+    await persistEvaluation("draft", { navigateAfter: true });
+  }
+
+  function handleDiscardAndLeave() {
+    setLeaveConfirmOpen(false);
+    router.push("/judge");
   }
 
   async function handleSendChat(e: FormEvent) {
@@ -735,7 +769,7 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
                 {report.contestantName} &middot; {category?.name ?? "Kategori"}
               </p>
             </div>
-            <Button variant="ghost" size="sm" onClick={() => router.push("/judge")}>
+            <Button variant="ghost" size="sm" onClick={handleBackToPanel}>
               ← Panele Dön
             </Button>
           </div>
@@ -1531,6 +1565,44 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
               onClick={confirmPendingDecision}
             >
               Onayla
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={leaveConfirmOpen} onOpenChange={setLeaveConfirmOpen}>
+        <AlertDialogContent className="p-6">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Panele dönmek istediğine emin misin?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Kaydedilmemiş değerlendirme değişikliklerin var. Taslak kayıt puanları, genel
+              yorumu ve varsa eleme önerisini saklar; geçici inceleme seçimleri kaydedilmeden
+              çıkılır.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="mx-0 mb-0 flex-col flex-wrap gap-2 rounded-none border-t-0 bg-transparent p-0 sm:flex-col sm:justify-start">
+            <AlertDialogAction
+              disabled={saving}
+              onClick={handleSaveDraftAndLeave}
+              className="w-full"
+            >
+              Taslak Olarak Kaydet ve Çık
+            </AlertDialogAction>
+            <AlertDialogCancel
+              disabled={saving}
+              onClick={() => setLeaveConfirmOpen(false)}
+              className="w-full"
+            >
+              Değerlendirmeye Devam Et
+            </AlertDialogCancel>
+            <AlertDialogAction
+              variant="link"
+              size="sm"
+              disabled={saving}
+              onClick={handleDiscardAndLeave}
+              className="mx-auto mt-1 h-auto text-destructive/80 no-underline hover:text-destructive hover:underline"
+            >
+              Kaydetmeden Çık
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

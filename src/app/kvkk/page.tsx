@@ -7,12 +7,7 @@ export const metadata: Metadata = {
 
 export default function KvkkPage() {
   return (
-    <LegalPageLayout
-      title="KVKK Aydınlatma Metni"
-      updatedAt="21 Ağustos 2026"
-      backHref="/login?tab=register"
-      backLabel="Kayıt formuna dön"
-    >
+    <LegalPageLayout title="KVKK Aydınlatma Metni" updatedAt="21 Ağustos 2026">
       <section>
         <p>
           İşbu Aydınlatma Metni, 6698 sayılı Kişisel Verilerin Korunması Kanunu&apos;nun

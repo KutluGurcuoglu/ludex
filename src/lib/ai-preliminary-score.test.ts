@@ -89,7 +89,7 @@ describe("computeAiPreliminaryScore", () => {
     );
 
     // Hakem okur: aynı report.aiEvaluation, toAIAnalysisResult() ile map'lenmiş (maxScore).
-    const mapped = toAIAnalysisResult("report-1", CACHED_EVALUATION);
+    const mapped = toAIAnalysisResult("report-1", CACHED_EVALUATION, false);
     const fromMappedCache = computeAiPreliminaryScore(
       mapped.criteriaEvaluations.map((c) => ({ score: c.score, maxScore: c.maxScore })),
     );
