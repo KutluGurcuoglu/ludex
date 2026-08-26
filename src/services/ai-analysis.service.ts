@@ -67,13 +67,17 @@ export function toAIAnalysisResult(
   const criticalFindings: CriticalSpecFinding[] = specificationAnalysis.findings
     .map((finding, index) => ({ finding, index }))
     .filter(({ finding }) => finding.severity === "high")
-    .map(({ finding, index }) => ({
-      id: `spec-${index}`,
-      ruleText: finding.ruleText,
-      findingText: finding.findingText,
-      probability: finding.severity,
-      evidenceId: `spec-${index}`,
-    }));
+    .map(({ finding, index }) => {
+      const id = `spec-${index}`;
+      const hasEvidence = Boolean(finding.pageNumber && finding.exactExcerpt);
+      return {
+        id,
+        ruleText: finding.ruleText,
+        findingText: finding.findingText,
+        probability: finding.severity,
+        evidenceId: hasEvidence ? id : null,
+      };
+    });
 
   const templateCompliance: ComplianceCheckItem[] = output.headingContentAnalysis.map((h) => {
     const id = `heading-${h.sectionId}`;
@@ -90,6 +94,20 @@ export function toAIAnalysisResult(
       unverifiable: !hasEvidence && (missing || !h.headingPresent),
     };
   });
+  const existingTemplateSectionIds = new Set(
+    output.headingContentAnalysis.map((section) => section.sectionId)
+  );
+  for (const sectionId of output.templateAnalysis.missingSections) {
+    if (existingTemplateSectionIds.has(sectionId)) continue;
+    templateCompliance.push({
+      id: `heading-${sectionId}`,
+      label: sectionId,
+      passed: false,
+      detail: "Bölüm raporda bulunamadı.",
+      evidenceIds: [],
+      unverifiable: true,
+    });
+  }
 
   const criteriaEvaluations: CriterionAiEvaluation[] = output.criteriaEvaluations.map((c) => {
     const id = `criterion-${c.criterionId}`;

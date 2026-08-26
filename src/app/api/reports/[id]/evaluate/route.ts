@@ -7,10 +7,15 @@ import type { CategoryEvaluationCriterion } from "@/lib/repositories/category-re
 import { evaluateReport } from "@/lib/ai-evaluation/evaluate";
 import { findSimilarReports } from "@/lib/ai-evaluation/similarity";
 import { attachVerifiedEvidence } from "@/lib/ai-evaluation/postprocess";
+import { deriveTemplateCompliance } from "@/lib/ai-evaluation/template-compliance";
 import { computeContextHash } from "@/lib/ai-evaluation/context-hash";
 import { resolveReadiness } from "@/lib/ai-evaluation/readiness";
 import { toPageMarkedContent } from "@/lib/ai-evaluation/report-content";
 import { normalizeSpecificationAnalysis } from "@/lib/specification-compliance";
+import {
+  InvalidCriteriaEvaluationsError,
+  validateCriteriaEvaluations,
+} from "@/lib/ai-evaluation/criteria-validation";
 import type { ScoreCriterion } from "@/types";
 
 /** Hakemin puanladığı efektif kriterleri (kategoriye özel ya da global), AI'nın beklediği şekle çevirir. */
@@ -84,6 +89,8 @@ export async function POST(
       evaluationCriteria: toAiCriteria(effectiveCriteria),
     });
 
+    validateCriteriaEvaluations(evaluation.criteriaEvaluations, effectiveCriteria);
+
     // Şartname yüklenmemişse, AI prompt'a "ihlal uydurma" talimatı verilmiş
     // olsa da bu bir garanti değildir — sunucu tarafı invariant: şartname
     // yoksa AI ne döndürürse döndürsün specificationAnalysis güvenli/nötr
@@ -98,6 +105,11 @@ export async function POST(
     // güvenmez — her iddiayı raporun gerçek sayfa metnine karşı doğrular ve
     // doğrulanamayanları sonuçtan çıkarır (bkz. postprocess.ts).
     const verifiedEvaluation = attachVerifiedEvidence(evaluation, report.extractedPages);
+    verifiedEvaluation.templateAnalysis = deriveTemplateCompliance(
+      category.templateSections,
+      verifiedEvaluation.headingContentAnalysis,
+      verifiedEvaluation.templateAnalysis.notes
+    );
 
     // criterionId yalnızca bir id'dir (genelde UUID) — UI'nın gösterebileceği
     // gerçek kriter adı/maxScore'u, hakemin puanlarken kullandığı AYNI
@@ -150,6 +162,12 @@ export async function POST(
 
     return NextResponse.json({ success: true, evaluation: enrichedEvaluation });
   } catch (error) {
+    if (error instanceof InvalidCriteriaEvaluationsError) {
+      return NextResponse.json(
+        { error: "Geçersiz kriter değerlendirmesi.", details: error.message },
+        { status: 400 }
+      );
+    }
     if (error instanceof z.ZodError) {
       return NextResponse.json(
         { error: "Geçersiz değerlendirme girdisi.", issues: error.issues },

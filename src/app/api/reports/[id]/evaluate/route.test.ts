@@ -99,6 +99,43 @@ beforeEach(() => {
   evaluateReport.mockReset().mockResolvedValue(fakeSpecViolationOutput());
 });
 
+describe("POST /api/reports/[id]/evaluate — deterministik şablon uygunluğu", () => {
+  it("AI compliant=true dönse bile coverage eksikse persisted templateAnalysis.compliant false olur", async () => {
+    resolveReadiness.mockResolvedValue({
+      status: "fresh",
+      category: {
+        id: "cat-1",
+        name: "Test Kategorisi",
+        specificationText: undefined,
+        templateSections: [
+          { id: "sec-1", title: "Giriş", expectedContent: "Amaç." },
+          { id: "sec-2", title: "Yöntem", expectedContent: "Yöntem." },
+        ],
+      },
+      effectiveCriteria: [{ id: "c1", label: "Kriter 1", maxScore: 10 }],
+    });
+    evaluateReport.mockResolvedValue({
+      ...fakeSpecViolationOutput(),
+      templateAnalysis: { compliant: true, missingSections: [], notes: "AI şablona uygun dedi." },
+      headingContentAnalysis: [
+        { sectionId: "sec-1", headingPresent: true, contentMatchesExpectation: true, notes: "ok" },
+      ],
+    });
+
+    const res = await POST(makeRequest(), { params: Promise.resolve({ id: "report-1" }) });
+    const body = await res.json();
+    const persisted = setAiEvaluation.mock.calls[0][1];
+
+    expect(res.status).toBe(200);
+    expect(body.evaluation.templateAnalysis).toEqual({
+      compliant: false,
+      missingSections: ["sec-2"],
+      notes: "AI şablona uygun dedi.",
+    });
+    expect(persisted.templateAnalysis).toEqual(body.evaluation.templateAnalysis);
+  });
+});
+
 describe("POST /api/reports/[id]/evaluate — şartname opsiyonelliği", () => {
   it("kategori şartnamesizken (specificationText undefined) AI'nın uydurduğu ihlali persist etmeden önce normalize eder", async () => {
     resolveReadiness.mockResolvedValue({
@@ -182,5 +219,29 @@ describe("POST /api/reports/[id]/evaluate — şartname opsiyonelliği", () => {
     expect(body.evaluation.specificationAnalysis.findings[0].ruleText).toBe(
       "En az iki bağımsız sensör kullanılmalıdır."
     );
+  });
+});
+
+describe("POST /api/reports/[id]/evaluate — kriter semantic validation", () => {
+  it("rejects invalid criteria output without persisting it", async () => {
+    resolveReadiness.mockResolvedValue({
+      status: "fresh",
+      category: {
+        id: "cat-1",
+        name: "Test Kategorisi",
+        specificationText: undefined,
+        templateSections: [],
+      },
+      effectiveCriteria: [{ id: "c1", label: "Kriter 1", maxScore: 10 }],
+    });
+    evaluateReport.mockResolvedValue({
+      ...fakeSpecViolationOutput(),
+      criteriaEvaluations: [{ criterionId: "unknown", score: 8, reason: "iyi" }],
+    });
+
+    const res = await POST(makeRequest(), { params: Promise.resolve({ id: "report-1" }) });
+
+    expect(res.status).toBe(400);
+    expect(setAiEvaluation).not.toHaveBeenCalled();
   });
 });

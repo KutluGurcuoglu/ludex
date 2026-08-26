@@ -77,7 +77,7 @@ describe("toAIAnalysisResult — specification opsiyonelliği", () => {
   });
 
   // C) gerçek specificationText varsa AI'nın gerçek violation finding'i korunmalı.
-  it("preserves a real spec violation finding untouched when the category does have a specification", () => {
+  it("keeps a high spec finding but sets evidenceId to null when it has no verified evidence", () => {
     const output = evaluationWithFakeSpecViolation();
     output.specificationAnalysis = {
       compliant: false,
@@ -95,7 +95,31 @@ describe("toAIAnalysisResult — specification opsiyonelliği", () => {
 
     expect(result.criticalFindings).toHaveLength(1);
     expect(result.criticalFindings[0].ruleText).toBe("En az iki bağımsız sensör kullanılmalıdır.");
+    expect(result.criticalFindings[0].evidenceId).toBeNull();
     expect(result.specCompliance[0].passed).toBe(false);
+  });
+
+  it('keeps evidenceId as "spec-0" when a high spec finding has verified evidence', () => {
+    const output = evaluationWithFakeSpecViolation();
+    output.specificationAnalysis = {
+      compliant: false,
+      findings: [
+        {
+          ruleText: "En az iki bağımsız sensör kullanılmalıdır.",
+          findingText: "Rapor tek sensör kullanıyor.",
+          severity: "high",
+          pageNumber: 2,
+          exactExcerpt: "tek sensör",
+        },
+      ],
+      notes: "Şartnameye aykırı bir durum tespit edildi.",
+    };
+    output.evidences = [{ id: "spec-0", page: 2, excerpt: "tek sensör" }];
+
+    const result = toAIAnalysisResult("report-1", output, true);
+
+    expect(result.criticalFindings).toHaveLength(1);
+    expect(result.criticalFindings[0].evidenceId).toBe("spec-0");
   });
 
   // E) şartname yokken kalan AI analizi/kriter puanları kaybolmamalı.
@@ -110,6 +134,67 @@ describe("toAIAnalysisResult — specification opsiyonelliği", () => {
     expect(result.contentAnalysis.strengths).toEqual(["Güçlü yön."]);
     expect(result.contentAnalysis.improvementSuggestions).toEqual(["Öneri."]);
     expect(result.languageCheck.detectedLanguage).toBe("Türkçe");
+  });
+});
+
+describe("toAIAnalysisResult — eksik şablon bölümleri", () => {
+  it("adds a failed template item for a missing section", () => {
+    const output = evaluationWithFakeSpecViolation();
+    output.templateAnalysis = {
+      compliant: false,
+      missingSections: ["sec-2"],
+      notes: "Şablon bölümü eksik.",
+    };
+
+    const result = toAIAnalysisResult("report-1", output, false);
+
+    expect(result.templateCompliance).toContainEqual({
+      id: "heading-sec-2",
+      label: "sec-2",
+      passed: false,
+      detail: "Bölüm raporda bulunamadı.",
+      evidenceIds: [],
+      unverifiable: true,
+    });
+  });
+
+  it("does not duplicate a missing section already returned by headingContentAnalysis", () => {
+    const output = evaluationWithFakeSpecViolation();
+    output.templateAnalysis = { compliant: false, missingSections: ["sec-1"], notes: "Eksik." };
+
+    const result = toAIAnalysisResult("report-1", output, false);
+
+    expect(result.templateCompliance.filter((item) => item.id === "heading-sec-1")).toHaveLength(1);
+    expect(result.templateCompliance[0]).toEqual(
+      expect.objectContaining({ detail: "Uygun.", passed: true })
+    );
+  });
+
+  it("keeps the existing behavior when there are no missing sections", () => {
+    const output = evaluationWithFakeSpecViolation();
+
+    const result = toAIAnalysisResult("report-1", output, false);
+
+    expect(result.templateCompliance).toHaveLength(1);
+    expect(result.templateCompliance[0].id).toBe("heading-sec-1");
+  });
+
+  it("adds all missing sections in the reported order", () => {
+    const output = evaluationWithFakeSpecViolation();
+    output.templateAnalysis = {
+      compliant: false,
+      missingSections: ["sec-2", "sec-3"],
+      notes: "Bölümler eksik.",
+    };
+
+    const result = toAIAnalysisResult("report-1", output, false);
+
+    expect(result.templateCompliance.map((item) => item.id)).toEqual([
+      "heading-sec-1",
+      "heading-sec-2",
+      "heading-sec-3",
+    ]);
+    expect(result.templateCompliance.slice(1).every((item) => !item.passed)).toBe(true);
   });
 });
 
