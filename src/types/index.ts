@@ -313,7 +313,7 @@ export interface CriticalSpecFinding {
   ruleText: string;
   findingText: string;
   probability: Severity;
-  evidenceId: string;
+  evidenceId: string | null;
 }
 
 export interface ContentAnalysis {

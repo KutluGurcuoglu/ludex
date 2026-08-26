@@ -77,7 +77,7 @@ describe("toAIAnalysisResult — specification opsiyonelliği", () => {
   });
 
   // C) gerçek specificationText varsa AI'nın gerçek violation finding'i korunmalı.
-  it("preserves a real spec violation finding untouched when the category does have a specification", () => {
+  it("keeps a high spec finding but sets evidenceId to null when it has no verified evidence", () => {
     const output = evaluationWithFakeSpecViolation();
     output.specificationAnalysis = {
       compliant: false,
@@ -95,7 +95,31 @@ describe("toAIAnalysisResult — specification opsiyonelliği", () => {
 
     expect(result.criticalFindings).toHaveLength(1);
     expect(result.criticalFindings[0].ruleText).toBe("En az iki bağımsız sensör kullanılmalıdır.");
+    expect(result.criticalFindings[0].evidenceId).toBeNull();
     expect(result.specCompliance[0].passed).toBe(false);
+  });
+
+  it('keeps evidenceId as "spec-0" when a high spec finding has verified evidence', () => {
+    const output = evaluationWithFakeSpecViolation();
+    output.specificationAnalysis = {
+      compliant: false,
+      findings: [
+        {
+          ruleText: "En az iki bağımsız sensör kullanılmalıdır.",
+          findingText: "Rapor tek sensör kullanıyor.",
+          severity: "high",
+          pageNumber: 2,
+          exactExcerpt: "tek sensör",
+        },
+      ],
+      notes: "Şartnameye aykırı bir durum tespit edildi.",
+    };
+    output.evidences = [{ id: "spec-0", page: 2, excerpt: "tek sensör" }];
+
+    const result = toAIAnalysisResult("report-1", output, true);
+
+    expect(result.criticalFindings).toHaveLength(1);
+    expect(result.criticalFindings[0].evidenceId).toBe("spec-0");
   });
 
   // E) şartname yokken kalan AI analizi/kriter puanları kaybolmamalı.

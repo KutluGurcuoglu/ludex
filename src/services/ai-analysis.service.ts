@@ -67,13 +67,17 @@ export function toAIAnalysisResult(
   const criticalFindings: CriticalSpecFinding[] = specificationAnalysis.findings
     .map((finding, index) => ({ finding, index }))
     .filter(({ finding }) => finding.severity === "high")
-    .map(({ finding, index }) => ({
-      id: `spec-${index}`,
-      ruleText: finding.ruleText,
-      findingText: finding.findingText,
-      probability: finding.severity,
-      evidenceId: `spec-${index}`,
-    }));
+    .map(({ finding, index }) => {
+      const id = `spec-${index}`;
+      const hasEvidence = Boolean(finding.pageNumber && finding.exactExcerpt);
+      return {
+        id,
+        ruleText: finding.ruleText,
+        findingText: finding.findingText,
+        probability: finding.severity,
+        evidenceId: hasEvidence ? id : null,
+      };
+    });
 
   const templateCompliance: ComplianceCheckItem[] = output.headingContentAnalysis.map((h) => {
     const id = `heading-${h.sectionId}`;
