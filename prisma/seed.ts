@@ -25,7 +25,7 @@ async function main() {
       passwordHash,
       fullName: "Admin Kullanıcı",
       phone: "+90 500 000 00 00",
-      //phoneNormalized: normalizePhone("+90 500 000 00 00"),
+      phoneNormalized: normalizePhone("+90 500 000 00 00"),
       role: Role.ADMIN,
     },
   });
