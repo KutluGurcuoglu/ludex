@@ -94,6 +94,20 @@ export function toAIAnalysisResult(
       unverifiable: !hasEvidence && (missing || !h.headingPresent),
     };
   });
+  const existingTemplateSectionIds = new Set(
+    output.headingContentAnalysis.map((section) => section.sectionId)
+  );
+  for (const sectionId of output.templateAnalysis.missingSections) {
+    if (existingTemplateSectionIds.has(sectionId)) continue;
+    templateCompliance.push({
+      id: `heading-${sectionId}`,
+      label: sectionId,
+      passed: false,
+      detail: "Bölüm raporda bulunamadı.",
+      evidenceIds: [],
+      unverifiable: true,
+    });
+  }
 
   const criteriaEvaluations: CriterionAiEvaluation[] = output.criteriaEvaluations.map((c) => {
     const id = `criterion-${c.criterionId}`;

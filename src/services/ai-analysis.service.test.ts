@@ -137,6 +137,67 @@ describe("toAIAnalysisResult — specification opsiyonelliği", () => {
   });
 });
 
+describe("toAIAnalysisResult — eksik şablon bölümleri", () => {
+  it("adds a failed template item for a missing section", () => {
+    const output = evaluationWithFakeSpecViolation();
+    output.templateAnalysis = {
+      compliant: false,
+      missingSections: ["sec-2"],
+      notes: "Şablon bölümü eksik.",
+    };
+
+    const result = toAIAnalysisResult("report-1", output, false);
+
+    expect(result.templateCompliance).toContainEqual({
+      id: "heading-sec-2",
+      label: "sec-2",
+      passed: false,
+      detail: "Bölüm raporda bulunamadı.",
+      evidenceIds: [],
+      unverifiable: true,
+    });
+  });
+
+  it("does not duplicate a missing section already returned by headingContentAnalysis", () => {
+    const output = evaluationWithFakeSpecViolation();
+    output.templateAnalysis = { compliant: false, missingSections: ["sec-1"], notes: "Eksik." };
+
+    const result = toAIAnalysisResult("report-1", output, false);
+
+    expect(result.templateCompliance.filter((item) => item.id === "heading-sec-1")).toHaveLength(1);
+    expect(result.templateCompliance[0]).toEqual(
+      expect.objectContaining({ detail: "Uygun.", passed: true })
+    );
+  });
+
+  it("keeps the existing behavior when there are no missing sections", () => {
+    const output = evaluationWithFakeSpecViolation();
+
+    const result = toAIAnalysisResult("report-1", output, false);
+
+    expect(result.templateCompliance).toHaveLength(1);
+    expect(result.templateCompliance[0].id).toBe("heading-sec-1");
+  });
+
+  it("adds all missing sections in the reported order", () => {
+    const output = evaluationWithFakeSpecViolation();
+    output.templateAnalysis = {
+      compliant: false,
+      missingSections: ["sec-2", "sec-3"],
+      notes: "Bölümler eksik.",
+    };
+
+    const result = toAIAnalysisResult("report-1", output, false);
+
+    expect(result.templateCompliance.map((item) => item.id)).toEqual([
+      "heading-sec-1",
+      "heading-sec-2",
+      "heading-sec-3",
+    ]);
+    expect(result.templateCompliance.slice(1).every((item) => !item.passed)).toBe(true);
+  });
+});
+
 /**
  * evaluation-workspace.tsx'teki handleStartAnalysis(), "checking" durumunda
  * takılı kalmamak için getAIAnalysis()'in reddettiği her durumda bir Error
