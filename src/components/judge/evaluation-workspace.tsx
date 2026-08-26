@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Document, Page, pdfjs } from "react-pdf";
@@ -75,6 +75,7 @@ import {
   computeOverallScoreDiff,
   hasCompleteJudgeScore,
 } from "@/lib/ai-preliminary-score";
+import { buildGateFindings, type GateFinding } from "@/lib/gate-findings";
 import type {
   AIAnalysisResult,
   ComplianceCheckItem,
@@ -183,6 +184,12 @@ function CriterionEvaluationRow({
   judgeScore?: number;
 }) {
   const diff = judgeScore != null && item.score != null ? judgeScore - item.score : null;
+  const unavailableLabel =
+    item.scoreUnavailableReason === "relevance_blocked"
+      ? "Puanlama yapılmadı"
+      : item.scoreUnavailableReason === "evidence_unverified"
+        ? "Kriter kanıtı doğrulanamadı"
+        : "Puan ölçeği tanımlı değil";
 
   return (
     <div className="space-y-1 rounded-lg bg-muted/40 p-3">
@@ -196,7 +203,7 @@ function CriterionEvaluationRow({
         ) : (
           <span className="flex items-center gap-1 text-sm text-amber-600 dark:text-amber-400">
             <AlertTriangle className="size-4 shrink-0" />
-            Puan ölçeği tanımlı değil
+            {unavailableLabel}
           </span>
         )}
       </div>
@@ -268,62 +275,6 @@ const ANALYSIS_CHECK_LABELS = [
   "Kriter bazlı AI değerlendirmesi",
 ];
 
-type GateFindingKind = "critical" | "language" | "spec";
-
-interface GateFinding {
-  id: string;
-  kind: GateFindingKind;
-  title: string;
-  ruleText: string;
-  findingText: string;
-  probability: Severity;
-  evidenceId: string | null;
-}
-
-/**
- * Hakemin karar vermeden geçemeyeceği tüm bulgular: kritik şartname bulguları,
- * dil denetimi başarısızlığı ve genel şartname (specCompliance) ihlalleri.
- */
-function buildGateFindings(analysis: AIAnalysisResult): GateFinding[] {
-  const findings: GateFinding[] = analysis.criticalFindings.map((f) => ({
-    id: f.id,
-    kind: "critical",
-    title: "KRİTİK ŞARTNAME BULGUSU",
-    ruleText: f.ruleText,
-    findingText: f.findingText,
-    probability: f.probability,
-    evidenceId: f.evidenceId,
-  }));
-
-  if (!analysis.languageCheck.passed) {
-    findings.push({
-      id: "language-check",
-      kind: "language",
-      title: "DİL DENETİMİ UYARISI",
-      ruleText: `Rapor, şartnamede belirtilen ${analysis.languageCheck.expectedLanguage} dilinde yazılmalıdır.`,
-      findingText: `Tespit edilen dil: ${analysis.languageCheck.detectedLanguage} (güven: %${analysis.languageCheck.confidence})`,
-      probability: analysis.languageCheck.confidence >= 80 ? "high" : "medium",
-      evidenceId: null,
-    });
-  }
-
-  analysis.specCompliance
-    .filter((item) => !item.passed)
-    .forEach((item) => {
-      findings.push({
-        id: item.id,
-        kind: "spec",
-        title: "ŞARTNAMEYE AYKIRI DURUM",
-        ruleText: item.label,
-        findingText: item.detail,
-        probability: "medium",
-        evidenceId: item.evidenceIds[0] ?? null,
-      });
-    });
-
-  return findings;
-}
-
 export function EvaluationWorkspace({ reportId }: { reportId: string }) {
   const router = useRouter();
   const user = useCurrentUser();
@@ -345,6 +296,7 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
   const [analysisState, setAnalysisState] = useState<AnalysisState>("idle");
   const [analysis, setAnalysis] = useState<AIAnalysisResult | null>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const retryAnalysisWithForce = useRef(false);
   const [copilotOpen, setCopilotOpen] = useState(false);
   const [compactCompliance, setCompactCompliance] = useState(false);
 
@@ -361,6 +313,16 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
   );
 
   const [scores, setScores] = useState<Record<string, number>>({});
+  const pdfFile = useMemo(() => ({ url: report?.pdfUrl ?? "" }), [report?.pdfUrl]);
+  const pdfOptions = useMemo(() => ({ verbosity: 0 }), []);
+  const onPdfLoadSuccess = useCallback(({ numPages: count }: { numPages: number }) => {
+    setNumPages(count);
+    setPageNumber((current) => Math.min(Math.max(current, 1), count));
+  }, []);
+  const onPdfRenderError = useCallback((error: Error) => {
+    if (error.name === "AbortException" || /TextLayer task cancelled/i.test(error.message)) return;
+    console.error("PDF sayfası oluşturulamadı:", error);
+  }, []);
   const [overallComment, setOverallComment] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -374,6 +336,7 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
     finding: GateFinding;
     decision: "flagged" | "dismissed";
   } | null>(null);
+  const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
 
   const [messages, setMessages] = useState<CopilotChatMessage[]>([
     {
@@ -437,13 +400,16 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
    */
   const aiPreliminaryScore = useMemo(
     () =>
-      analysis
+      analysis && analysis.relevanceAnalysis?.status === "relevant"
         ? computeAiPreliminaryScore(
             analysis.criteriaEvaluations.map((c) => ({ score: c.score, maxScore: c.maxScore })),
           )
         : null,
     [analysis],
   );
+
+  const relevanceBlocked = analysis?.relevanceAnalysis?.status === "unrelated";
+  const relevanceUncertain = analysis?.relevanceAnalysis?.status === "uncertain";
 
   const scoreDiff = computeOverallScoreDiff(
     aiPreliminaryScore,
@@ -508,13 +474,15 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
     revealResults();
   }
 
-  async function handleStartAnalysis() {
+  async function handleStartAnalysis(options?: { force?: boolean }) {
+    const force = options?.force === true;
+    retryAnalysisWithForce.current = force;
     setAnalysisState("checking");
     setAnalysisError(null);
 
     let result: AIAnalysisResult;
     try {
-      result = await aiAnalysisService.getAIAnalysis(reportId, hasSpecification);
+      result = await aiAnalysisService.getAIAnalysis(reportId, hasSpecification, { force });
     } catch (error) {
       setAnalysisState("error");
       setAnalysisError(error instanceof Error ? error.message : "AI analizi başlatılamadı.");
@@ -528,7 +496,9 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
     const allDecided = gateFindings.every((f) => findingDecisions[f.id]);
     if (!allDecided) return;
 
-    const anyFlagged = gateFindings.some((f) => findingDecisions[f.id] === "flagged");
+    const anyFlagged = gateFindings.some(
+      (f) => f.allowsElimination && findingDecisions[f.id] === "flagged"
+    );
     if (anyFlagged) {
       setAnalysisState("eliminated");
       toast.warning(
@@ -588,6 +558,11 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
     return evidence ? buildHighlightQuery(evidence.excerpt) : null;
   }, [focusedEvidenceId, focusedPassage, analysis]);
 
+  const customTextRenderer = useCallback(
+    ({ str }: { str: string }) => highlightTextItem(str, highlightQuery),
+    [highlightQuery]
+  );
+
   function requestFindingDecision(finding: GateFinding, decision: "flagged" | "dismissed") {
     setPendingDecision({ finding, decision });
   }
@@ -617,7 +592,30 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
     setScores((prev) => ({ ...prev, [criterionId]: value }));
   }
 
-  async function persistEvaluation(status: "draft" | "submitted") {
+  const hasUnsavedProgress =
+    existingEvaluation?.status !== "submitted" &&
+    (overallComment.trim() !== (existingEvaluation?.overallComment ?? "").trim() ||
+      scoreCriteria.some((criterion) => {
+        const savedScore =
+          existingEvaluation?.criteriaScores.find((cs) => cs.criterionId === criterion.id)?.score ?? 0;
+        return (scores[criterion.id] ?? 0) !== savedScore;
+      }) ||
+      JSON.stringify(disqualification) !==
+        JSON.stringify(existingEvaluation?.disqualificationRecommendation ?? null) ||
+      Object.values(findingDecisions).some((decision) => decision === "dismissed"));
+
+  function handleBackToPanel() {
+    if (hasUnsavedProgress) {
+      setLeaveConfirmOpen(true);
+      return;
+    }
+    router.push("/judge");
+  }
+
+  async function persistEvaluation(
+    status: "draft" | "submitted",
+    options?: { navigateAfter?: boolean },
+  ) {
     if (!user || !report) return;
     setSaving(true);
 
@@ -642,7 +640,7 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
       // disqualified) sunucuda otomatik türetiliyor — ikisini de tazelemek gerekir.
       await Promise.all([refreshEvaluations(), refreshReports()]);
       toast.success(status === "draft" ? "Taslak kaydedildi." : "Değerlendirme tamamlandı.");
-      if (status === "submitted") {
+      if (status === "submitted" || options?.navigateAfter) {
         router.push("/judge");
       }
     } catch (error) {
@@ -650,6 +648,16 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
     } finally {
       setSaving(false);
     }
+  }
+
+  async function handleSaveDraftAndLeave() {
+    setLeaveConfirmOpen(false);
+    await persistEvaluation("draft", { navigateAfter: true });
+  }
+
+  function handleDiscardAndLeave() {
+    setLeaveConfirmOpen(false);
+    router.push("/judge");
   }
 
   async function handleSendChat(e: FormEvent) {
@@ -735,7 +743,7 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
                 {report.contestantName} &middot; {category?.name ?? "Kategori"}
               </p>
             </div>
-            <Button variant="ghost" size="sm" onClick={() => router.push("/judge")}>
+            <Button variant="ghost" size="sm" onClick={handleBackToPanel}>
               ← Panele Dön
             </Button>
           </div>
@@ -769,8 +777,9 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
               </div>
               <div className="flex-1 overflow-auto bg-muted/40 p-4">
                 <Document
-                  file={report.pdfUrl}
-                  onLoadSuccess={({ numPages: n }) => setNumPages(n)}
+                  file={pdfFile}
+                  options={pdfOptions}
+                  onLoadSuccess={onPdfLoadSuccess}
                   loading={<Skeleton className="mx-auto h-[500px] w-full max-w-sm" />}
                   error={
                     <p className="p-6 text-center text-base text-muted-foreground">
@@ -783,7 +792,9 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
                     pageNumber={pageNumber}
                     width={420}
                     renderAnnotationLayer={false}
-                    customTextRenderer={({ str }) => highlightTextItem(str, highlightQuery)}
+                    onRenderError={onPdfRenderError}
+                    onRenderTextLayerError={onPdfRenderError}
+                    customTextRenderer={customTextRenderer}
                   />
                 </Document>
               </div>
@@ -806,7 +817,7 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
                         </p>
                       </div>
                       <Button
-                        onClick={handleStartAnalysis}
+                        onClick={() => handleStartAnalysis()}
                         className="mt-2 gap-2 transition-transform active:scale-[0.98]"
                       >
                         <Sparkles className="size-4" />
@@ -829,7 +840,7 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
                         </p>
                       </div>
                       <Button
-                        onClick={handleStartAnalysis}
+                        onClick={() => handleStartAnalysis({ force: retryAnalysisWithForce.current })}
                         variant="outline"
                         className="mt-2 gap-2 transition-transform active:scale-[0.98]"
                       >
@@ -853,7 +864,7 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
                         </p>
                       </div>
                       <Button
-                        onClick={handleStartAnalysis}
+                        onClick={() => handleStartAnalysis({ force: true })}
                         className="mt-2 gap-2 transition-transform active:scale-[0.98]"
                       >
                         <Sparkles className="size-4" />
@@ -918,7 +929,14 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
                       const decision = findingDecisions[finding.id];
                       const evidenceId = finding.evidenceId;
                       return (
-                        <Card key={finding.id} className="border-red-300 dark:border-red-900">
+                        <Card
+                          key={finding.id}
+                          className={
+                            finding.allowsElimination
+                              ? "border-red-300 dark:border-red-900"
+                              : "border-amber-300 dark:border-amber-900"
+                          }
+                        >
                           <CardHeader>
                             <CardTitle className="flex items-center gap-2 text-base text-red-700 dark:text-red-400">
                               <AlertOctagon className="size-4" />
@@ -929,6 +947,9 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
                             <div>
                               <p className="text-base font-medium text-muted-foreground">Şartname kuralı</p>
                               <p className="text-base">{finding.ruleText}</p>
+                              {finding.sourceLabel && (
+                                <p className="mt-1 text-sm text-muted-foreground">Kaynak: {finding.sourceLabel}</p>
+                              )}
                             </div>
                             <div>
                               <p className="text-base font-medium text-muted-foreground">Rapor bulgusu</p>
@@ -945,31 +966,35 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
                                 Kanıt: Rapor, Sayfa {analysis.evidences.find((e) => e.id === evidenceId)?.page}
                               </Button>
                             )}
-                            <div className="flex items-center justify-between rounded-lg bg-muted/50 px-3 py-2 text-base">
-                              <span className="text-muted-foreground">AI değerlendirmesi</span>
-                              <Badge variant="outline" className={SEVERITY_CLASS[finding.probability]}>
-                                Şartnameye aykırılık ihtimali: {SEVERITY_LABEL[finding.probability]}
+                            <div className="grid min-w-0 grid-cols-1 gap-2 rounded-lg bg-muted/50 px-3 py-2 text-base sm:flex sm:items-center sm:justify-between">
+                              <span className="min-w-0 text-muted-foreground">AI değerlendirmesi</span>
+                              <Badge variant="outline" className={`max-w-full justify-self-start whitespace-normal break-words ${SEVERITY_CLASS[finding.probability]}`}>
+                                {finding.allowsElimination
+                                  ? `Açık eleme kuralı: ${SEVERITY_LABEL[finding.probability]}`
+                                  : `Hakem incelemesi gerekli: ${SEVERITY_LABEL[finding.probability]}`}
                               </Badge>
                             </div>
 
                             {decision ? (
                               <p className="text-base font-medium text-muted-foreground">
-                                {decision === "flagged"
+                                {decision === "flagged" && finding.allowsElimination
                                   ? "Elemeyi önerdin — bu karar değerlendirme kaydına eklenecek."
-                                  : "İncelemeye devam etmeyi seçtin."}
+                                  : "Hakem incelemesine devam etmeyi seçtin."}
                               </p>
                             ) : (
                               <div className="flex gap-2">
-                                <Button
-                                  type="button"
-                                  variant="destructive"
-                                  size="sm"
-                                  className="flex-1 gap-1.5"
-                                  onClick={() => requestFindingDecision(finding, "flagged")}
-                                >
-                                  <ThumbsDown className="size-4" />
-                                  ELEMEYİ ÖNER
-                                </Button>
+                                {finding.allowsElimination && (
+                                  <Button
+                                    type="button"
+                                    variant="destructive"
+                                    size="sm"
+                                    className="flex-1 gap-1.5"
+                                    onClick={() => requestFindingDecision(finding, "flagged")}
+                                  >
+                                    <ThumbsDown className="size-4" />
+                                    ELEMEYİ ÖNER
+                                  </Button>
+                                )}
                                 <Button
                                   type="button"
                                   variant="outline"
@@ -978,7 +1003,7 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
                                   onClick={() => requestFindingDecision(finding, "dismissed")}
                                 >
                                   <ThumbsUp className="size-4" />
-                                  İNCELEMEYE DEVAM ET
+                                  {finding.allowsElimination ? "İNCELEMEYE DEVAM ET" : "HAKEM İNCELEMESİNE AKTAR"}
                                 </Button>
                               </div>
                             )}
@@ -987,6 +1012,26 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
                       );
                     })}
                   </div>
+                )}
+
+                {analysis && (relevanceBlocked || relevanceUncertain) && (
+                  <Alert variant={relevanceBlocked ? "destructive" : "default"}>
+                    <ShieldAlert className="size-4" />
+                    <AlertTitle>
+                      {relevanceBlocked ? "Kategori/Problem Uyumsuzluğu" : "Kategori/Problem Eşleşmesi Belirsiz"}
+                    </AlertTitle>
+                    <AlertDescription className="space-y-2">
+                      <p>
+                        {relevanceBlocked
+                          ? "Raporun temel konusu, aktif yarışma problemiyle anlamlı biçimde eşleşmiyor. Normal puanlama durduruldu."
+                          : "Normal AI puanlaması durduruldu. Hakem incelemesi gerekiyor."}
+                      </p>
+                      <p>{analysis.relevanceAnalysis?.explanation}</p>
+                      {analysis.relevanceAnalysis?.reportExcerpt && (
+                        <p className="text-sm">Rapor kanıtı: {analysis.relevanceAnalysis.reportExcerpt}</p>
+                      )}
+                    </AlertDescription>
+                  </Alert>
                 )}
 
                 {analysisState === "done" && analysis && summaryCounts && (
@@ -1208,15 +1253,21 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
                               Aşama 7 – Kriter Bazlı AI Değerlendirmesi
                             </AccordionTrigger>
                             <AccordionContent className="space-y-2">
-                              {analysis.criteriaEvaluations.map((c) => (
-                                <CriterionEvaluationRow
-                                  key={c.id}
-                                  item={c}
-                                  analysis={analysis}
-                                  onEvidence={jumpToEvidence}
-                                  judgeScore={scores[c.id]}
-                                />
-                              ))}
+                              {analysis.relevanceAnalysis?.status !== "relevant" ? (
+                                <p className="rounded-lg bg-muted/40 p-3 text-base text-muted-foreground">
+                                  Puanlama yapılmadı; kategori/problem eşleşmesi için hakem incelemesi gerekiyor.
+                                </p>
+                              ) : (
+                                analysis.criteriaEvaluations.map((c) => (
+                                  <CriterionEvaluationRow
+                                    key={c.id}
+                                    item={c}
+                                    analysis={analysis}
+                                    onEvidence={jumpToEvidence}
+                                    judgeScore={scores[c.id]}
+                                  />
+                                ))
+                              )}
                             </AccordionContent>
                           </AccordionItem>
 
@@ -1531,6 +1582,44 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
               onClick={confirmPendingDecision}
             >
               Onayla
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={leaveConfirmOpen} onOpenChange={setLeaveConfirmOpen}>
+        <AlertDialogContent className="p-6">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Panele dönmek istediğine emin misin?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Kaydedilmemiş değerlendirme değişikliklerin var. Taslak kayıt puanları, genel
+              yorumu ve varsa eleme önerisini saklar; geçici inceleme seçimleri kaydedilmeden
+              çıkılır.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="mx-0 mb-0 flex-col flex-wrap gap-2 rounded-none border-t-0 bg-transparent p-0 sm:flex-col sm:justify-start">
+            <AlertDialogAction
+              disabled={saving}
+              onClick={handleSaveDraftAndLeave}
+              className="w-full"
+            >
+              Taslak Olarak Kaydet ve Çık
+            </AlertDialogAction>
+            <AlertDialogCancel
+              disabled={saving}
+              onClick={() => setLeaveConfirmOpen(false)}
+              className="w-full"
+            >
+              Değerlendirmeye Devam Et
+            </AlertDialogCancel>
+            <AlertDialogAction
+              variant="link"
+              size="sm"
+              disabled={saving}
+              onClick={handleDiscardAndLeave}
+              className="mx-auto mt-1 h-auto text-destructive/80 no-underline hover:text-destructive hover:underline"
+            >
+              Kaydetmeden Çık
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

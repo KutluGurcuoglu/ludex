@@ -24,6 +24,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { RouteGuard } from "@/components/auth/route-guard";
 import { AppHeader } from "@/components/layout/app-header";
 import { ReportTimeline } from "@/components/report-timeline";
+import { AnnouncementsCard } from "@/components/announcements-card";
 import { aggregateEvaluations } from "@/lib/scoring";
 import {
   Card,
@@ -402,6 +403,8 @@ function ContestantDashboard() {
                 accent="emerald"
               />
             </div>
+
+            <AnnouncementsCard />
 
             <div className="mt-6 max-w-sm">
               <Card>

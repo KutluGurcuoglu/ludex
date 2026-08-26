@@ -181,26 +181,44 @@ class PrismaReportRepository implements ReportRepository {
   }
 
   async assignJudge(id: string, judgeId: string): Promise<ReportRecord | null> {
-    const report = await db.report.findUnique({ where: { id } });
-    if (!report) return null;
+    const exists = await db.$transaction(async (tx) => {
+      const report = await tx.report.findUnique({ where: { id } });
+      if (!report) return false;
 
-    await db.reportJudgeAssignment.upsert({
-      where: { reportId_judgeId: { reportId: id, judgeId } },
-      update: {},
-      create: { reportId: id, judgeId },
-    });
+      const assignment = await tx.reportJudgeAssignment.findUnique({
+        where: { reportId_judgeId: { reportId: id, judgeId } },
+      });
+      if (!assignment) {
+        await tx.reportJudgeAssignment.create({ data: { reportId: id, judgeId } });
+        await tx.notification.upsert({
+          where: { userId_kind_reportId: { userId: judgeId, kind: "report_assigned", reportId: id } },
+          update: {},
+          create: {
+            userId: judgeId,
+            kind: "report_assigned",
+            title: "Yeni rapor atandı",
+            body: report.title,
+            link: "/judge",
+            reportId: id,
+          },
+        });
+      }
 
-    const updated = await db.report.update({
-      where: { id },
-      data: {
-        assignedAt: new Date(),
-        ...(report.status === PrismaReportStatus.PENDING_ASSIGNMENT
-          ? { status: PrismaReportStatus.ASSIGNED }
-          : {}),
-      },
-      ...reportInclude,
+      await tx.report.update({
+        where: { id },
+        data: {
+          assignedAt: new Date(),
+          ...(report.status === PrismaReportStatus.PENDING_ASSIGNMENT
+            ? { status: PrismaReportStatus.ASSIGNED }
+            : {}),
+        },
+      });
+      return true;
     });
-    return toReportRecord(updated);
+    if (!exists) return null;
+
+    const updated = await db.report.findUnique({ where: { id }, ...reportInclude });
+    return updated ? toReportRecord(updated) : null;
   }
 
   async unassignJudge(id: string, judgeId: string): Promise<ReportRecord | null> {

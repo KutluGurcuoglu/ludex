@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { fetchCloudflareStructuredJson } = vi.hoisted(() => ({
   fetchCloudflareStructuredJson: vi.fn(),
@@ -8,7 +8,7 @@ vi.mock("@/lib/ai-shared/cloudflare-workers-ai", () => ({
   fetchCloudflareStructuredJson,
 }));
 
-import { callAiEvaluation } from "./client";
+import { callAiEvaluation, callAiRelevancePreflight } from "./client";
 
 const VALID_OUTPUT = {
   languageAnalysis: {
@@ -30,6 +30,10 @@ const VALID_OUTPUT = {
 };
 
 describe("callAiEvaluation", () => {
+  beforeEach(() => {
+    fetchCloudflareStructuredJson.mockReset();
+  });
+
   it("uses the fast instruct model and the reduced max token budget for full report evaluation", async () => {
     fetchCloudflareStructuredJson.mockResolvedValue(VALID_OUTPUT);
 
@@ -40,6 +44,47 @@ describe("callAiEvaluation", () => {
     expect(options).toEqual({
       model: "@cf/meta/llama-3.1-8b-instruct-fast",
       maxTokens: 8192,
+    });
+  });
+
+  it("asks Cloudflare only for model-owned fields", async () => {
+    fetchCloudflareStructuredJson.mockResolvedValue(VALID_OUTPUT);
+
+    await callAiEvaluation("system prompt", "user prompt");
+
+    const [, , schema] = fetchCloudflareStructuredJson.mock.calls[0];
+    expect(schema.required).not.toContain("similarReports");
+    expect(schema.required).not.toContain("evidences");
+    expect(schema.required).not.toContain("overallComplianceStatus");
+    expect(schema.properties).not.toHaveProperty("contextHash");
+    expect(schema.required).toEqual(
+      expect.arrayContaining([
+        "languageAnalysis",
+        "specificationAnalysis",
+        "templateAnalysis",
+        "headingContentAnalysis",
+        "criteriaEvaluations",
+      ])
+    );
+  });
+
+  it("uses a small structured-output budget for the relevance preflight", async () => {
+    fetchCloudflareStructuredJson.mockResolvedValue({
+      status: "relevant",
+      specificationRuleIds: ["spec-rule-1"],
+      reportPageNumber: 1,
+      reportExcerpt: "İHA otonom uçuş görevi.",
+      explanation: "Proje aktif görevle eşleşiyor.",
+      confidence: 0.9,
+      mappedConcepts: ["otonom uçuş"],
+    });
+
+    await callAiRelevancePreflight("system prompt", "user prompt");
+
+    const [, , , options] = fetchCloudflareStructuredJson.mock.calls[0];
+    expect(options).toEqual({
+      model: "@cf/meta/llama-3.1-8b-instruct-fast",
+      maxTokens: 1800,
     });
   });
 

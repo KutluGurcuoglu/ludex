@@ -1,5 +1,6 @@
 import { PrismaClient, Role, ApplicationStatus, JudgeWorkStatus } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import { normalizePhone } from "../src/lib/auth/phone";
 
 const prisma = new PrismaClient();
 
@@ -24,6 +25,7 @@ async function main() {
       passwordHash,
       fullName: "Admin Kullanıcı",
       phone: "+90 500 000 00 00",
+      phoneNormalized: normalizePhone("+90 500 000 00 00"),
       role: Role.ADMIN,
     },
   });
@@ -36,6 +38,7 @@ async function main() {
       passwordHash,
       fullName: "Dr. Elif Yılmaz",
       phone: "+90 532 111 22 33",
+      phoneNormalized: normalizePhone("+90 532 111 22 33"),
       role: Role.JUDGE,
       judgeApprovalStatus: ApplicationStatus.APPROVED,
       judgeWorkStatus: JudgeWorkStatus.WORKING,
@@ -50,6 +53,7 @@ async function main() {
       passwordHash,
       fullName: "Kaan Demir",
       phone: "+90 533 222 33 44",
+      phoneNormalized: normalizePhone("+90 533 222 33 44"),
       role: Role.JUDGE,
       judgeApprovalStatus: ApplicationStatus.APPROVED,
       judgeWorkStatus: JudgeWorkStatus.STUDYING,
@@ -64,6 +68,7 @@ async function main() {
       passwordHash,
       fullName: "Mehmet Can Öztürk",
       phone: "+90 541 333 44 55",
+      phoneNormalized: normalizePhone("+90 541 333 44 55"),
       role: Role.CONTESTANT,
     },
   });
@@ -76,6 +81,7 @@ async function main() {
       passwordHash,
       fullName: "Zeynep Kaya",
       phone: "+90 542 444 55 66",
+      phoneNormalized: normalizePhone("+90 542 444 55 66"),
       role: Role.CONTESTANT,
     },
   });
@@ -88,6 +94,7 @@ async function main() {
       passwordHash,
       fullName: "Ali Vural",
       phone: "+90 543 555 66 77",
+      phoneNormalized: normalizePhone("+90 543 555 66 77"),
       role: Role.CONTESTANT,
     },
   });

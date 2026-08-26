@@ -77,7 +77,7 @@ describe("toAIAnalysisResult — specification opsiyonelliği", () => {
   });
 
   // C) gerçek specificationText varsa AI'nın gerçek violation finding'i korunmalı.
-  it("preserves a real spec violation finding untouched when the category does have a specification", () => {
+  it("does not expose an elimination finding without validated disqualification classification", () => {
     const output = evaluationWithFakeSpecViolation();
     output.specificationAnalysis = {
       compliant: false,
@@ -93,9 +93,33 @@ describe("toAIAnalysisResult — specification opsiyonelliği", () => {
 
     const result = toAIAnalysisResult("report-1", output, true);
 
-    expect(result.criticalFindings).toHaveLength(1);
-    expect(result.criticalFindings[0].ruleText).toBe("En az iki bağımsız sensör kullanılmalıdır.");
+    expect(result.criticalFindings).toEqual([]);
     expect(result.specCompliance[0].passed).toBe(false);
+  });
+
+  it('keeps evidenceId as "spec-0" when a high spec finding has verified evidence', () => {
+    const output = evaluationWithFakeSpecViolation();
+    output.specificationAnalysis = {
+      compliant: false,
+      findings: [
+        {
+          ruleText: "En az iki bağımsız sensör kullanılmalıdır.",
+          findingText: "Rapor tek sensör kullanıyor.",
+          severity: "high",
+          pageNumber: 2,
+          exactExcerpt: "tek sensör",
+          classification: "disqualification",
+          ruleSourceLabel: "Şartname bölüm 1",
+        },
+      ],
+      notes: "Şartnameye aykırı bir durum tespit edildi.",
+    };
+    output.evidences = [{ id: "spec-0", page: 2, excerpt: "tek sensör" }];
+
+    const result = toAIAnalysisResult("report-1", output, true);
+
+    expect(result.criticalFindings).toHaveLength(1);
+    expect(result.criticalFindings[0].evidenceId).toBe("spec-0");
   });
 
   // E) şartname yokken kalan AI analizi/kriter puanları kaybolmamalı.
@@ -113,6 +137,67 @@ describe("toAIAnalysisResult — specification opsiyonelliği", () => {
   });
 });
 
+describe("toAIAnalysisResult — eksik şablon bölümleri", () => {
+  it("adds a failed template item for a missing section", () => {
+    const output = evaluationWithFakeSpecViolation();
+    output.templateAnalysis = {
+      compliant: false,
+      missingSections: ["sec-2"],
+      notes: "Şablon bölümü eksik.",
+    };
+
+    const result = toAIAnalysisResult("report-1", output, false);
+
+    expect(result.templateCompliance).toContainEqual({
+      id: "heading-sec-2",
+      label: "sec-2",
+      passed: false,
+      detail: "Bölüm raporda bulunamadı.",
+      evidenceIds: [],
+      unverifiable: true,
+    });
+  });
+
+  it("does not duplicate a missing section already returned by headingContentAnalysis", () => {
+    const output = evaluationWithFakeSpecViolation();
+    output.templateAnalysis = { compliant: false, missingSections: ["sec-1"], notes: "Eksik." };
+
+    const result = toAIAnalysisResult("report-1", output, false);
+
+    expect(result.templateCompliance.filter((item) => item.id === "heading-sec-1")).toHaveLength(1);
+    expect(result.templateCompliance[0]).toEqual(
+      expect.objectContaining({ detail: "Uygun.", passed: true })
+    );
+  });
+
+  it("keeps the existing behavior when there are no missing sections", () => {
+    const output = evaluationWithFakeSpecViolation();
+
+    const result = toAIAnalysisResult("report-1", output, false);
+
+    expect(result.templateCompliance).toHaveLength(1);
+    expect(result.templateCompliance[0].id).toBe("heading-sec-1");
+  });
+
+  it("adds all missing sections in the reported order", () => {
+    const output = evaluationWithFakeSpecViolation();
+    output.templateAnalysis = {
+      compliant: false,
+      missingSections: ["sec-2", "sec-3"],
+      notes: "Bölümler eksik.",
+    };
+
+    const result = toAIAnalysisResult("report-1", output, false);
+
+    expect(result.templateCompliance.map((item) => item.id)).toEqual([
+      "heading-sec-1",
+      "heading-sec-2",
+      "heading-sec-3",
+    ]);
+    expect(result.templateCompliance.slice(1).every((item) => !item.passed)).toBe(true);
+  });
+});
+
 /**
  * evaluation-workspace.tsx'teki handleStartAnalysis(), "checking" durumunda
  * takılı kalmamak için getAIAnalysis()'in reddettiği her durumda bir Error
@@ -121,6 +206,36 @@ describe("toAIAnalysisResult — specification opsiyonelliği", () => {
  * hata yanıtı döndüğü senaryoda bu sözleşmenin hâlâ doğru çalıştığını doğrular.
  */
 describe("getAIAnalysis", () => {
+  it("adds force=true only for an explicit rerun", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ evaluation: evaluationWithFakeSpecViolation() }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getAIAnalysis("report-1", true, { force: true });
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/reports/report-1/evaluate?force=true", {
+      method: "POST",
+    });
+  });
+
+  it("keeps normal analysis requests cacheable by omitting force", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ evaluation: evaluationWithFakeSpecViolation() }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getAIAnalysis("report-1", true);
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/reports/report-1/evaluate", {
+      method: "POST",
+    });
+  });
+
   it("rejects with the server's error message when /evaluate responds with a failure status", async () => {
     vi.stubGlobal(
       "fetch",

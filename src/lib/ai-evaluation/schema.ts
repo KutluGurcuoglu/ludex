@@ -30,8 +30,14 @@ export const evaluationInputSchema = z.object({
    * göre yapılır.
    */
   categoryDescription: z.string().optional(),
+  reportTitle: z.string().optional(),
   /** Yarışmanın güncel şartname PDF'inden çıkarılmış gerçek metni. Yüklenmemişse boş bırakılır. */
   specificationContent: z.string().optional(),
+  specificationRules: z
+    .array(
+      z.object({ id: z.string().min(1), text: z.string().min(1), sourceLabel: z.string().min(1) })
+    )
+    .default([]),
   template: reportTemplateSchema,
   evaluationCriteria: z.array(evaluationCriterionSchema).min(1),
 });
@@ -71,9 +77,31 @@ export const categoryFitSchema = z.object({
   reason: z.string().min(1),
 });
 
+export const relevanceAnalysisSchema = z.object({
+  status: z.enum(["relevant", "uncertain", "unrelated"]).default("uncertain"),
+  specificationRuleIds: z.array(z.string().min(1)).default([]),
+  reportPageNumber: z.number().int().positive().optional(),
+  reportExcerpt: z.string().optional(),
+  explanation: z.string().min(1).default("Kategori/problem eşleşmesi doğrulanamadı."),
+  confidence: z.number().min(0).max(1).default(0),
+  mappedConcepts: z.array(z.string().min(1)).default([]),
+});
+
+/** The small, authoritative gate run before the much larger criterion evaluation. */
+export const relevancePreflightInputSchema = evaluationInputSchema.pick({
+  reportContent: true,
+  category: true,
+  categoryDescription: true,
+  reportTitle: true,
+  specificationRules: true,
+});
+
 export const criterionEvaluationSchema = z.object({
   criterionId: z.string().min(1),
   score: z.number().min(0).nullable(),
+  scoreUnavailableReason: z
+    .enum(["relevance_blocked", "evidence_unverified", "scale_missing"])
+    .optional(),
   reason: z.string().min(1),
   evidence: z.string().min(1).optional(),
   pageNumber: z.number().int().positive().optional(),
@@ -85,9 +113,14 @@ export const criterionEvaluationSchema = z.object({
 
 /** Şartnamedeki bir kurala karşı raporda tespit edilen somut bir bulgu. */
 export const specificationFindingSchema = z.object({
+  /** Server-issued ID from evaluationInput.specificationRules; free-form rules are never authoritative. */
+  ruleId: z.string().min(1).optional(),
+  /** Stamped by the server from the authoritative specification. */
+  ruleSourceLabel: z.string().min(1).optional(),
   ruleText: z.string().min(1),
   findingText: z.string().min(1),
   severity: z.enum(["low", "medium", "high"]),
+  classification: z.enum(["disqualification", "requirement"]).optional(),
   /** Yalnızca raporda gerçekten var olan bir alıntı için doldurulur. */
   pageNumber: z.number().int().positive().optional(),
   exactExcerpt: z.string().optional(),
@@ -131,6 +164,14 @@ export const evaluationOutputSchema = z.object({
   templateAnalysis: templateAnalysisSchema,
   headingContentAnalysis: z.array(headingContentAnalysisItemSchema).min(1),
   categoryFit: categoryFitSchema,
+  relevanceAnalysis: relevanceAnalysisSchema.default({
+    status: "uncertain",
+    specificationRuleIds: [],
+    explanation: "Kategori/problem eşleşmesi doğrulanamadı.",
+    confidence: 0,
+    mappedConcepts: [],
+  }),
+  overallComplianceStatus: z.enum(["compliant", "non_compliant", "needs_review", "not_evaluated"]).default("needs_review"),
   criteriaEvaluations: z.array(criterionEvaluationSchema).min(1),
   strengths: z.array(z.string().min(1)),
   areasForImprovement: z.array(z.string().min(1)),
@@ -159,6 +200,20 @@ export const evaluationOutputSchema = z.object({
     .default([]),
 });
 
+/**
+ * Only fields the model is responsible for generating. Similarity, verified
+ * evidence, context metadata and the final compliance status are derived by
+ * the server after validation; including them in Cloudflare's response schema
+ * made the model spend output capacity on empty/overwritten values.
+ */
+export const aiEvaluationOutputSchema = evaluationOutputSchema.omit({
+  overallComplianceStatus: true,
+  similarReports: true,
+  similarityScore: true,
+  contextHash: true,
+  evidences: true,
+});
+
 export type LanguageAnalysis = z.infer<typeof languageAnalysisSchema>;
 export type SpecificationFinding = z.infer<typeof specificationFindingSchema>;
 export type SpecificationAnalysis = z.infer<typeof specificationAnalysisSchema>;
@@ -167,6 +222,8 @@ export type HeadingContentAnalysisItem = z.infer<
   typeof headingContentAnalysisItemSchema
 >;
 export type CategoryFit = z.infer<typeof categoryFitSchema>;
+export type RelevanceAnalysis = z.infer<typeof relevanceAnalysisSchema>;
+export type RelevancePreflightInput = z.infer<typeof relevancePreflightInputSchema>;
 export type CriterionEvaluation = z.infer<typeof criterionEvaluationSchema>;
 export type SimilarityBreakdownItem = z.infer<typeof similarityBreakdownItemSchema>;
 export type SimilarReportMatch = z.infer<typeof similarReportMatchSchema>;

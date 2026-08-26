@@ -7,12 +7,7 @@ export const metadata: Metadata = {
 
 export default function TermsPage() {
   return (
-    <LegalPageLayout
-      title="Kullanım Şartları"
-      updatedAt="21 Ağustos 2026"
-      backHref="/login?tab=register"
-      backLabel="Kayıt formuna dön"
-    >
+    <LegalPageLayout title="Kullanım Şartları" updatedAt="21 Ağustos 2026">
       <section>
         <h2>1. Taraflar ve Kapsam</h2>
         <p>

@@ -22,11 +22,19 @@ export type CloudflareStructuredJsonOptions = {
   timeoutMs?: number;
 };
 
+export class CloudflareAiTimeoutError extends Error {
+  constructor() {
+    super("Cloudflare Workers AI request timed out.");
+    this.name = "CloudflareAiTimeoutError";
+  }
+}
+
 export async function fetchCloudflareStructuredJson(
   systemPrompt: string,
   userPrompt: string,
   jsonSchema: object,
-  options?: CloudflareStructuredJsonOptions
+  options?: CloudflareStructuredJsonOptions,
+  attempt: number = 0
 ): Promise<unknown> {
   const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
   const apiToken = process.env.CLOUDFLARE_API_TOKEN;
@@ -72,7 +80,7 @@ export async function fetchCloudflareStructuredJson(
     // bir DOMException ile reject olur (kullanıcı kaynaklı iptal - "AbortError" -
     // ile karıştırılmamalı; burada yalnızca zaman aşımı senaryosu var).
     if (error instanceof Error && error.name === "TimeoutError") {
-      throw new Error("Cloudflare Workers AI request timed out.");
+      throw new CloudflareAiTimeoutError();
     }
     throw error;
   }
@@ -101,7 +109,8 @@ export async function fetchCloudflareStructuredJson(
     );
   }
 
-  const message = (choices[0] as { message?: unknown } | undefined)?.message;
+  const choice = choices[0] as { message?: unknown; finish_reason?: unknown } | undefined;
+  const message = choice?.message;
   if (!message || typeof message !== "object") {
     throw new Error(
       "Invalid Cloudflare Workers AI response: choices[0].message is missing."
@@ -118,6 +127,14 @@ export async function fetchCloudflareStructuredJson(
   try {
     return JSON.parse(content);
   } catch (error) {
-    throw new Error("Invalid JSON returned by AI", { cause: error });
+    console.warn("AI structured JSON parse failed", {
+      attempt: attempt + 1,
+      contentLength: content.length,
+      finishReason: typeof choice?.finish_reason === "string" ? choice.finish_reason : "unknown",
+    });
+    if (attempt === 0) {
+      return fetchCloudflareStructuredJson(systemPrompt, userPrompt, jsonSchema, options, 1);
+    }
+    throw new Error("AI returned truncated or malformed JSON; analysis can be retried.", { cause: error });
   }
 }
