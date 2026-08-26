@@ -64,6 +64,9 @@ import type { User } from "@/types";
 const ANALYZING_BADGE_CLASS =
   "border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-900 dark:bg-violet-950 dark:text-violet-300";
 
+/** Cloudflare text-generation limitinin çok altında kalan kontrollü paralellik. */
+const AI_ANALYSIS_CONCURRENCY = 2;
+
 /**
  * Hakem seçim menüsü — arama kutusu içerir. Radix Select'in "item-aligned" konumlandırması
  * (seçili değer boşken, ör. "+ hakem ekle" düğmesinde) hizalayacağı bir öğe bulamayınca
@@ -272,15 +275,14 @@ export default function AdminPoolPage() {
 
   /**
    * Var olan POST /api/reports/:id/evaluate'i kullanır — yeni bir AI backend'i
-   * değil. Cloudflare'e gereksiz paralel yük bindirmemek için raporlar
-   * sırayla (Promise.all değil) analiz edilir; bir rapor hata verse bile
-   * batch tamamen bırakılmaz, kalan raporlar işlenmeye devam eder.
+   * değil. Cloudflare'e kontrolsüz yük bindirmemek için aynı anda en fazla iki
+   * rapor analiz edilir; bir rapor hata verse bile kalanlar devam eder.
    *
    * Satır bazında canlı durum için: her raporun kendi id'si, o raporun
    * isteği sürerken analyzingReportIds'e girer ve İSTEK BİTER BİTMEZ (başarı
-   * ya da hata, finally ile) çıkar — bir sonraki rapora geçmeden. Satırın
+   * ya da hata, finally ile) çıkar — bir sonraki küçük gruba geçmeden. Satırın
    * "Tamamlandı"/"Güncel Değil" durumuna hemen geçebilmesi için de rapor
-   * listesi, batch'in tamamı bitince değil, HER rapor sonrası tazelenir.
+   * listesi, bulk'un tamamı bitince değil, HER küçük grup sonrası tazelenir.
    * Bir raporun analizi başarısız olursa DB'deki mevcut kalıcı durumu
    * bozulmadan kalır — yeni bir "error" DB durumu icat edilmez, hata
    * yalnızca batch sonundaki toast ile bildirilir.
@@ -298,21 +300,42 @@ export default function AdminPoolPage() {
     setBulkAnalyzing(true);
     let succeeded = 0;
     let failed = 0;
+    const failureMessages: string[] = [];
     try {
-      for (const report of toAnalyze) {
-        setAnalyzingReportIds((prev) => new Set(prev).add(report.id));
-        try {
-          try {
-            await reportsService.runAiAnalysis(report.id);
-            succeeded++;
-          } catch (error) {
-            failed++;
-            console.error(`AI analizi başarısız oldu (rapor ${report.id}):`, error);
-          }
+      for (let index = 0; index < toAnalyze.length; index += AI_ANALYSIS_CONCURRENCY) {
+        const batch = toAnalyze.slice(index, index + AI_ANALYSIS_CONCURRENCY);
+        setAnalyzingReportIds((prev) => {
+          const next = new Set(prev);
+          batch.forEach((report) => next.add(report.id));
+          return next;
+        });
 
-          // Bu raporun satırı, bir sonraki rapor başlamadan önce gerçek
-          // (başarılı/stale) durumunu göstermeli — bu yüzden yalnızca batch
-          // sonunda değil, her rapor sonrası tazeleniyor. Bir tazeleme
+        try {
+          const results = await Promise.all(
+            batch.map(async (report) => {
+              try {
+                await reportsService.runAiAnalysis(report.id);
+                return { report, error: null };
+              } catch (error) {
+                return { report, error };
+              }
+            }),
+          );
+
+          results.forEach(({ report, error }) => {
+            if (!error) {
+              succeeded++;
+              return;
+            }
+
+            failed++;
+            const message = error instanceof Error ? error.message : "AI analizi başarısız oldu.";
+            failureMessages.push(message);
+            console.error(`AI analizi başarısız oldu (rapor ${report.id}):`, error);
+          });
+
+          // Bu grubun satırları, sonraki grup başlamadan önce gerçek
+          // (başarılı/stale) durumunu göstermeli. Bir tazeleme
           // başarısız olsa bile (ör. geçici ağ hatası) kalan raporların
           // analizine devam edilir.
           try {
@@ -321,14 +344,14 @@ export default function AdminPoolPage() {
             console.error("Rapor listesi güncellenemedi:", error);
           }
         } finally {
-          // id, refreshReports denemesi bitene kadar analyzingReportIds'te
+          // id'ler, refreshReports denemesi bitene kadar analyzingReportIds'te
           // kalır — aksi halde store henüz tazelenmeden "Analiz Ediliyor..."
           // satırı "Bekliyor"a dönüp bir anlığına yanlış bir ara duruma
           // (flash) düşer. Böylece satır doğrudan "Analiz Ediliyor..." →
           // (refreshReports) → "Tamamlandı"/"Güncel Değil" akışını izler.
           setAnalyzingReportIds((prev) => {
             const next = new Set(prev);
-            next.delete(report.id);
+            batch.forEach((report) => next.delete(report.id));
             return next;
           });
         }
@@ -339,7 +362,8 @@ export default function AdminPoolPage() {
       const parts = [`${succeeded} rapor analiz edildi`];
       if (alreadyFresh > 0) parts.push(`${alreadyFresh} rapor zaten güncel`);
       if (failed > 0) parts.push(`${failed} rapor başarısız oldu`);
-      const message = `${parts.join(", ")}.`;
+      const firstFailure = failureMessages[0];
+      const message = `${parts.join(", ")}.${firstFailure ? ` İlk hata: ${firstFailure}` : ""}`;
       if (failed > 0) {
         toast.warning(message);
       } else {

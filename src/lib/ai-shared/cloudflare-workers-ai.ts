@@ -22,6 +22,13 @@ export type CloudflareStructuredJsonOptions = {
   timeoutMs?: number;
 };
 
+export class CloudflareAiTimeoutError extends Error {
+  constructor() {
+    super("Cloudflare Workers AI request timed out.");
+    this.name = "CloudflareAiTimeoutError";
+  }
+}
+
 export async function fetchCloudflareStructuredJson(
   systemPrompt: string,
   userPrompt: string,
@@ -73,7 +80,7 @@ export async function fetchCloudflareStructuredJson(
     // bir DOMException ile reject olur (kullanıcı kaynaklı iptal - "AbortError" -
     // ile karıştırılmamalı; burada yalnızca zaman aşımı senaryosu var).
     if (error instanceof Error && error.name === "TimeoutError") {
-      throw new Error("Cloudflare Workers AI request timed out.");
+      throw new CloudflareAiTimeoutError();
     }
     throw error;
   }

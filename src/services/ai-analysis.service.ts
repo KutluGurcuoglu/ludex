@@ -195,9 +195,12 @@ export function toAIAnalysisResult(
 
 export async function getAIAnalysis(
   reportId: string,
-  hasSpecification: boolean
+  hasSpecification: boolean,
+  /** Yalnızca kullanıcı açıkça yeniden çalıştırmayı seçtiğinde true olmalı. */
+  options?: { force?: boolean }
 ): Promise<AIAnalysisResult> {
-  const res = await fetch(`/api/reports/${reportId}/evaluate`, { method: "POST" });
+  const forceQuery = options?.force ? "?force=true" : "";
+  const res = await fetch(`/api/reports/${reportId}/evaluate${forceQuery}`, { method: "POST" });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     throw new Error(data.error ?? "AI analizi alınamadı.");

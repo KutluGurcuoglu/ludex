@@ -52,4 +52,21 @@ describe("runAiAnalysis", () => {
 
     await expect(runAiAnalysis("report-1")).rejects.toThrow("AI analizi başarısız oldu.");
   });
+
+  it("surfaces the understandable timeout message returned by the server", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: false,
+        status: 504,
+        json: async () => ({
+          error: "AI sağlayıcısı 90 saniye içinde yanıt veremedi. Lütfen tekrar deneyin.",
+        }),
+      }))
+    );
+
+    await expect(runAiAnalysis("report-1")).rejects.toThrow(
+      "AI sağlayıcısı 90 saniye içinde yanıt veremedi. Lütfen tekrar deneyin."
+    );
+  });
 });

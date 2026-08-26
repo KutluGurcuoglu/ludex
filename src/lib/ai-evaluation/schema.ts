@@ -200,6 +200,20 @@ export const evaluationOutputSchema = z.object({
     .default([]),
 });
 
+/**
+ * Only fields the model is responsible for generating. Similarity, verified
+ * evidence, context metadata and the final compliance status are derived by
+ * the server after validation; including them in Cloudflare's response schema
+ * made the model spend output capacity on empty/overwritten values.
+ */
+export const aiEvaluationOutputSchema = evaluationOutputSchema.omit({
+  overallComplianceStatus: true,
+  similarReports: true,
+  similarityScore: true,
+  contextHash: true,
+  evidences: true,
+});
+
 export type LanguageAnalysis = z.infer<typeof languageAnalysisSchema>;
 export type SpecificationFinding = z.infer<typeof specificationFindingSchema>;
 export type SpecificationAnalysis = z.infer<typeof specificationAnalysisSchema>;

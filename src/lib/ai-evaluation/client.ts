@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  aiEvaluationOutputSchema,
   evaluationOutputSchema,
   relevanceAnalysisSchema,
   type EvaluationOutput,
@@ -14,24 +15,13 @@ export async function callAiEvaluation(
   const rawOutput = await fetchCloudflareStructuredJson(
     systemPrompt,
     userPrompt,
-    z.toJSONSchema(evaluationOutputSchema),
-    // Demo E2E'de gerçek full evaluation ~75 saniye sürdü — gpt-oss-20b bir
-    // "reasoning" modeli olduğu için yanıtlamadan önce dahili muhakeme
-    // (reasoning_content) üretip max_tokens bütçesinin büyük kısmını
-    // tüketiyordu (bu yüzden önceden 32768'e çıkarılmıştı). llama-3.1-8b-
-    // instruct-fast bir reasoning modeli DEĞİLDİR — gizli bir muhakeme
-    // aşaması yok, max_tokens'ın tamamı doğrudan görünür JSON çıktısına
-    // gidiyor ve model daha küçük/hızlı olduğu için yanıt süresi de kısalıyor.
-    //
-    // 8192, mevcut şema için gerçekçi bir üst sınırdır: tipik bir demo
-    // senaryosunda (4 kriter, ~10-15 şablon bölümü, 0-birkaç şartname
-    // bulgusu) beklenen JSON çıktısı bunun çok altında kalır — her
-    // criteriaEvaluations/headingContentAnalysis/specificationAnalysis.
-    // findings öğesi kısa (reason/notes birkaç cümle, evidence/exactExcerpt
-    // tek bir alıntı) olduğundan, hiçbir alan kesilmeden (kriterler, şablon
-    // bölümleri, bulgular, strengths/areasForImprovement/recommendations
-    // dahil) tamamı için yeterli alan bırakır.
-    { model: "@cf/meta/llama-3.1-8b-instruct-fast", maxTokens: 12000 }
+    z.toJSONSchema(aiEvaluationOutputSchema),
+    // Gerçek kayıtlardaki en büyük tam JSON çıktısı yaklaşık 6.4 bin
+    // karakterdir (19 şablon bölümü + 4 kriter dahil). 8192 output token,
+    // bu gözlenen boyutun birkaç katı güvenlik payını bırakır. Ayrıca
+    // server-owned similarReports/evidences/context/status alanları model
+    // şemasından çıkarıldığı için bu bütçe yalnızca gerçek AI alanlarına gider.
+    { model: "@cf/meta/llama-3.1-8b-instruct-fast", maxTokens: 8_192 }
   );
 
   const parsedOutput = evaluationOutputSchema.safeParse(rawOutput);
