@@ -34,4 +34,26 @@ describe("buildEvaluationPrompt — kategori bağlamı", () => {
     expect(prompt).not.toContain("KATEGORİ AÇIKLAMASI");
     expect(prompt).toContain("İnsansız Hava Aracı");
   });
+
+  it("does not duplicate specification text when authoritative rules are present", () => {
+    const uniqueRuleText = "Rapor en az iki bağımsız sensör içermelidir.";
+    const input = evaluationInputSchema.parse({
+      ...BASE_INPUT,
+      specificationContent: uniqueRuleText,
+      specificationRules: [
+        { id: "spec-rule-1", text: uniqueRuleText, sourceLabel: "Şartname bölüm 1" },
+      ],
+    });
+
+    const prompt = buildEvaluationPrompt(input);
+    expect(prompt.split(uniqueRuleText)).toHaveLength(2);
+    expect(prompt).toContain("ruleId: spec-rule-1");
+  });
+
+  it("keeps the no-specification safety instruction", () => {
+    const input = evaluationInputSchema.parse(BASE_INPUT);
+    const prompt = buildEvaluationPrompt(input);
+
+    expect(prompt).toContain("hiçbir ihlal bulgusu üretme");
+  });
 });
