@@ -7,6 +7,7 @@ import type { CategoryEvaluationCriterion } from "@/lib/repositories/category-re
 import { evaluateReport } from "@/lib/ai-evaluation/evaluate";
 import { findSimilarReports } from "@/lib/ai-evaluation/similarity";
 import { attachVerifiedEvidence } from "@/lib/ai-evaluation/postprocess";
+import { deriveTemplateCompliance } from "@/lib/ai-evaluation/template-compliance";
 import { computeContextHash } from "@/lib/ai-evaluation/context-hash";
 import { resolveReadiness } from "@/lib/ai-evaluation/readiness";
 import { toPageMarkedContent } from "@/lib/ai-evaluation/report-content";
@@ -98,6 +99,11 @@ export async function POST(
     // güvenmez — her iddiayı raporun gerçek sayfa metnine karşı doğrular ve
     // doğrulanamayanları sonuçtan çıkarır (bkz. postprocess.ts).
     const verifiedEvaluation = attachVerifiedEvidence(evaluation, report.extractedPages);
+    verifiedEvaluation.templateAnalysis = deriveTemplateCompliance(
+      category.templateSections,
+      verifiedEvaluation.headingContentAnalysis,
+      verifiedEvaluation.templateAnalysis.notes
+    );
 
     // criterionId yalnızca bir id'dir (genelde UUID) — UI'nın gösterebileceği
     // gerçek kriter adı/maxScore'u, hakemin puanlarken kullandığı AYNI
