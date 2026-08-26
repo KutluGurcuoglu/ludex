@@ -139,6 +139,14 @@
     scrollbar-gutter: stable;
   }
 
+  /* Radix overlays keep modal behavior by locking body scroll. Since the
+     document reserves the scrollbar track above, remove-scroll's additional
+     right-side compensation would otherwise shift every page layout. */
+  html body[data-scroll-locked] {
+    margin-right: 0 !important;
+    padding-right: 0 !important;
+  }
+
   /* Site-wide film-grain texture, Pryzm-style designer polish. */
   body::before {
     content: "";
