@@ -8,6 +8,8 @@ export interface ContextHashInput {
   criteria: ScoreCriterion[];
 }
 
+export const EVALUATION_POLICY_VERSION = 4;
+
 /**
  * Bir kategorinin o anki AI değerlendirme bağlamının (şartname metni +
  * şablon bölümleri + efektif kriterler) parmak izi. Aynı girdi her zaman
@@ -19,6 +21,7 @@ export interface ContextHashInput {
  */
 export function computeContextHash(input: ContextHashInput): string {
   const canonical = JSON.stringify({
+    evaluationPolicyVersion: EVALUATION_POLICY_VERSION,
     specification: input.specificationText ?? "",
     template: input.templateSections.map((s) => ({
       id: s.id,

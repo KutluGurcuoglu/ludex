@@ -58,7 +58,9 @@ describe("buildGateFindings", () => {
     );
 
     expect(result.filter((finding) => finding.id === "spec-0")).toHaveLength(1);
-    expect(result[0]).toEqual(expect.objectContaining({ id: "spec-0", kind: "critical" }));
+    expect(result[0]).toEqual(
+      expect.objectContaining({ id: "spec-0", kind: "critical", allowsElimination: false })
+    );
   });
 
   it("keeps failed non-critical specCompliance items in the gate list", () => {
@@ -82,6 +84,7 @@ describe("buildGateFindings", () => {
         id: "spec-1",
         kind: "spec",
         title: "ŞARTNAMEYE AYKIRI DURUM",
+        allowsElimination: false,
       }),
     ]);
   });
@@ -110,7 +113,30 @@ describe("buildGateFindings", () => {
         findingText: "Kritik bulgu.",
         probability: "high",
         evidenceId: null,
+        allowsElimination: false,
       },
     ]);
+  });
+
+  it("allows elimination only for a validated explicit disqualification finding", () => {
+    const result = buildGateFindings(
+      baseAnalysis({
+        criticalFindings: [
+          {
+            id: "spec-1",
+            ruleText: "Bu koşulu sağlamayan başvurular diskalifiye edilir.",
+            findingText: "Rapor koşulu sağlamıyor.",
+            probability: "high",
+            evidenceId: "spec-1",
+            classification: "disqualification",
+            sourceLabel: "Şartname bölüm 2",
+          },
+        ],
+      })
+    );
+
+    expect(result[0]).toEqual(
+      expect.objectContaining({ allowsElimination: true, sourceLabel: "Şartname bölüm 2" })
+    );
   });
 });

@@ -4,13 +4,26 @@ import { z } from "zod";
 import { auth } from "@/auth";
 import { getStorageProvider } from "@/lib/storage";
 import { getReportRepository, type ReportRecord } from "@/lib/repositories/report-repository";
-import { getCategoryRepository, isSubmissionWindowOpen } from "@/lib/repositories/category-repository";
+import {
+  getCategoryRepository,
+  isSubmissionWindowOpen,
+  type CategoryTemplateSection,
+} from "@/lib/repositories/category-repository";
 import { getUserRepository } from "@/lib/repositories/user-repository";
 import { getEvaluationRepository, type EvaluationRecord } from "@/lib/repositories/evaluation-repository";
 import { getScoreCriteriaRepository, getEffectiveCriteria } from "@/lib/repositories/score-criteria-repository";
 import { getTextExtractor } from "@/lib/text-extraction";
 import { deriveAiFeedback } from "@/lib/ai-feedback";
 import { computeContextHash } from "@/lib/ai-evaluation/context-hash";
+import {
+  buildAuthoritativeSpecificationRules,
+  reconcileLanguageCompliance,
+  validateSpecificationFindings,
+} from "@/lib/specification-compliance";
+import {
+  deriveTemplateCompliance,
+  normalizeHeadingContentAnalysis,
+} from "@/lib/ai-evaluation/template-compliance";
 import type { AIContestantFeedback } from "@/types";
 
 // LlamaParse gerçek modda çalıştığında iş birkaç dakika sürebilir; Vercel
@@ -42,7 +55,9 @@ async function toApiReport(
   report: ReportRecord,
   includeAiEvaluation: boolean,
   aiFeedback: AIContestantFeedback | null = null,
-  currentContextHash: string | null = null
+  currentContextHash: string | null = null,
+  templateSections: CategoryTemplateSection[] = [],
+  specificationText: string | null = null
 ) {
   const [contestant, pdfUrl] = await Promise.all([
     getUserRepository().findById(report.contestantId),
@@ -76,7 +91,49 @@ async function toApiReport(
     ? report.aiEvaluation.contextHash !== currentContextHash
     : false;
 
-  return { ...base, aiEvaluation: report.aiEvaluation, aiAnalysisStale };
+  let aiEvaluation = report.aiEvaluation;
+  if (aiEvaluation && templateSections.length > 0) {
+    const normalized = normalizeHeadingContentAnalysis(
+      templateSections,
+      aiEvaluation.headingContentAnalysis
+    );
+    aiEvaluation = {
+      ...aiEvaluation,
+      headingContentAnalysis: normalized.items,
+      templateAnalysis: deriveTemplateCompliance(
+        templateSections,
+        normalized.items,
+        aiEvaluation.templateAnalysis.notes,
+        normalized.issues
+      ),
+      evidences: aiEvaluation.evidences.filter(
+        (evidence, index, all) => all.findIndex((candidate) => candidate.id === evidence.id) === index
+      ),
+    };
+  }
+  if (aiEvaluation && specificationText?.trim()) {
+    aiEvaluation = {
+      ...aiEvaluation,
+      languageAnalysis: reconcileLanguageCompliance(aiEvaluation.languageAnalysis, specificationText),
+    };
+    const validatedSpecification = validateSpecificationFindings(
+      aiEvaluation.specificationAnalysis,
+      buildAuthoritativeSpecificationRules(specificationText),
+      report.extractedPages
+    );
+    aiEvaluation = {
+      ...aiEvaluation,
+      specificationAnalysis: validatedSpecification.analysis,
+      areasForImprovement: [
+        ...new Set([
+          ...aiEvaluation.areasForImprovement,
+          ...validatedSpecification.technicalWeaknesses,
+        ]),
+      ],
+    };
+  }
+
+  return { ...base, aiEvaluation, aiAnalysisStale };
 }
 
 export async function POST(req: Request) {
@@ -193,12 +250,16 @@ export async function GET() {
   // arasında paylaşıyoruz — computeContextHash tek kaynak, evaluate route'un
   // bir analiz üretirken kullandığı algoritmanın birebir aynısı.
   const categoryContextHashes = new Map<string, string>();
+  const categoryTemplateSections = new Map<string, CategoryTemplateSection[]>();
+  const categorySpecificationTexts = new Map<string, string | null>();
   if (includeAiEvaluation) {
     const [categories, globalCriteria] = await Promise.all([
       getCategoryRepository().listAll(),
       getScoreCriteriaRepository().listAll(),
     ]);
     for (const category of categories) {
+      categoryTemplateSections.set(category.id, category.templateSections);
+      categorySpecificationTexts.set(category.id, category.specificationText);
       categoryContextHashes.set(
         category.id,
         computeContextHash({
@@ -233,7 +294,9 @@ export async function GET() {
         r,
         includeAiEvaluation,
         aiFeedback,
-        categoryContextHashes.get(r.categoryId) ?? null
+        categoryContextHashes.get(r.categoryId) ?? null,
+        categoryTemplateSections.get(r.categoryId) ?? [],
+        categorySpecificationTexts.get(r.categoryId) ?? null
       );
     })
   );

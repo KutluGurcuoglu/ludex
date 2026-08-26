@@ -77,7 +77,7 @@ describe("toAIAnalysisResult — specification opsiyonelliği", () => {
   });
 
   // C) gerçek specificationText varsa AI'nın gerçek violation finding'i korunmalı.
-  it("keeps a high spec finding but sets evidenceId to null when it has no verified evidence", () => {
+  it("does not expose an elimination finding without validated disqualification classification", () => {
     const output = evaluationWithFakeSpecViolation();
     output.specificationAnalysis = {
       compliant: false,
@@ -93,9 +93,7 @@ describe("toAIAnalysisResult — specification opsiyonelliği", () => {
 
     const result = toAIAnalysisResult("report-1", output, true);
 
-    expect(result.criticalFindings).toHaveLength(1);
-    expect(result.criticalFindings[0].ruleText).toBe("En az iki bağımsız sensör kullanılmalıdır.");
-    expect(result.criticalFindings[0].evidenceId).toBeNull();
+    expect(result.criticalFindings).toEqual([]);
     expect(result.specCompliance[0].passed).toBe(false);
   });
 
@@ -110,6 +108,8 @@ describe("toAIAnalysisResult — specification opsiyonelliği", () => {
           severity: "high",
           pageNumber: 2,
           exactExcerpt: "tek sensör",
+          classification: "disqualification",
+          ruleSourceLabel: "Şartname bölüm 1",
         },
       ],
       notes: "Şartnameye aykırı bir durum tespit edildi.",

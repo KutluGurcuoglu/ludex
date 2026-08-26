@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Document, Page, pdfjs } from "react-pdf";
@@ -184,6 +184,12 @@ function CriterionEvaluationRow({
   judgeScore?: number;
 }) {
   const diff = judgeScore != null && item.score != null ? judgeScore - item.score : null;
+  const unavailableLabel =
+    item.scoreUnavailableReason === "relevance_blocked"
+      ? "Puanlama yapılmadı"
+      : item.scoreUnavailableReason === "evidence_unverified"
+        ? "Kriter kanıtı doğrulanamadı"
+        : "Puan ölçeği tanımlı değil";
 
   return (
     <div className="space-y-1 rounded-lg bg-muted/40 p-3">
@@ -197,7 +203,7 @@ function CriterionEvaluationRow({
         ) : (
           <span className="flex items-center gap-1 text-sm text-amber-600 dark:text-amber-400">
             <AlertTriangle className="size-4 shrink-0" />
-            Puan ölçeği tanımlı değil
+            {unavailableLabel}
           </span>
         )}
       </div>
@@ -306,6 +312,16 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
   );
 
   const [scores, setScores] = useState<Record<string, number>>({});
+  const pdfFile = useMemo(() => ({ url: report?.pdfUrl ?? "" }), [report?.pdfUrl]);
+  const pdfOptions = useMemo(() => ({ verbosity: 0 }), []);
+  const onPdfLoadSuccess = useCallback(({ numPages: count }: { numPages: number }) => {
+    setNumPages(count);
+    setPageNumber((current) => Math.min(Math.max(current, 1), count));
+  }, []);
+  const onPdfRenderError = useCallback((error: Error) => {
+    if (error.name === "AbortException" || /TextLayer task cancelled/i.test(error.message)) return;
+    console.error("PDF sayfası oluşturulamadı:", error);
+  }, []);
   const [overallComment, setOverallComment] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -383,13 +399,16 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
    */
   const aiPreliminaryScore = useMemo(
     () =>
-      analysis
+      analysis && analysis.relevanceAnalysis?.status === "relevant"
         ? computeAiPreliminaryScore(
             analysis.criteriaEvaluations.map((c) => ({ score: c.score, maxScore: c.maxScore })),
           )
         : null,
     [analysis],
   );
+
+  const relevanceBlocked = analysis?.relevanceAnalysis?.status === "unrelated";
+  const relevanceUncertain = analysis?.relevanceAnalysis?.status === "uncertain";
 
   const scoreDiff = computeOverallScoreDiff(
     aiPreliminaryScore,
@@ -474,7 +493,9 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
     const allDecided = gateFindings.every((f) => findingDecisions[f.id]);
     if (!allDecided) return;
 
-    const anyFlagged = gateFindings.some((f) => findingDecisions[f.id] === "flagged");
+    const anyFlagged = gateFindings.some(
+      (f) => f.allowsElimination && findingDecisions[f.id] === "flagged"
+    );
     if (anyFlagged) {
       setAnalysisState("eliminated");
       toast.warning(
@@ -533,6 +554,11 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
     const evidence = analysis.evidences.find((e) => e.id === focusedEvidenceId);
     return evidence ? buildHighlightQuery(evidence.excerpt) : null;
   }, [focusedEvidenceId, focusedPassage, analysis]);
+
+  const customTextRenderer = useCallback(
+    ({ str }: { str: string }) => highlightTextItem(str, highlightQuery),
+    [highlightQuery]
+  );
 
   function requestFindingDecision(finding: GateFinding, decision: "flagged" | "dismissed") {
     setPendingDecision({ finding, decision });
@@ -748,8 +774,9 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
               </div>
               <div className="flex-1 overflow-auto bg-muted/40 p-4">
                 <Document
-                  file={report.pdfUrl}
-                  onLoadSuccess={({ numPages: n }) => setNumPages(n)}
+                  file={pdfFile}
+                  options={pdfOptions}
+                  onLoadSuccess={onPdfLoadSuccess}
                   loading={<Skeleton className="mx-auto h-[500px] w-full max-w-sm" />}
                   error={
                     <p className="p-6 text-center text-base text-muted-foreground">
@@ -762,7 +789,9 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
                     pageNumber={pageNumber}
                     width={420}
                     renderAnnotationLayer={false}
-                    customTextRenderer={({ str }) => highlightTextItem(str, highlightQuery)}
+                    onRenderError={onPdfRenderError}
+                    onRenderTextLayerError={onPdfRenderError}
+                    customTextRenderer={customTextRenderer}
                   />
                 </Document>
               </div>
@@ -897,7 +926,14 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
                       const decision = findingDecisions[finding.id];
                       const evidenceId = finding.evidenceId;
                       return (
-                        <Card key={finding.id} className="border-red-300 dark:border-red-900">
+                        <Card
+                          key={finding.id}
+                          className={
+                            finding.allowsElimination
+                              ? "border-red-300 dark:border-red-900"
+                              : "border-amber-300 dark:border-amber-900"
+                          }
+                        >
                           <CardHeader>
                             <CardTitle className="flex items-center gap-2 text-base text-red-700 dark:text-red-400">
                               <AlertOctagon className="size-4" />
@@ -908,6 +944,9 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
                             <div>
                               <p className="text-base font-medium text-muted-foreground">Şartname kuralı</p>
                               <p className="text-base">{finding.ruleText}</p>
+                              {finding.sourceLabel && (
+                                <p className="mt-1 text-sm text-muted-foreground">Kaynak: {finding.sourceLabel}</p>
+                              )}
                             </div>
                             <div>
                               <p className="text-base font-medium text-muted-foreground">Rapor bulgusu</p>
@@ -924,31 +963,35 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
                                 Kanıt: Rapor, Sayfa {analysis.evidences.find((e) => e.id === evidenceId)?.page}
                               </Button>
                             )}
-                            <div className="flex items-center justify-between rounded-lg bg-muted/50 px-3 py-2 text-base">
-                              <span className="text-muted-foreground">AI değerlendirmesi</span>
-                              <Badge variant="outline" className={SEVERITY_CLASS[finding.probability]}>
-                                Şartnameye aykırılık ihtimali: {SEVERITY_LABEL[finding.probability]}
+                            <div className="grid min-w-0 grid-cols-1 gap-2 rounded-lg bg-muted/50 px-3 py-2 text-base sm:flex sm:items-center sm:justify-between">
+                              <span className="min-w-0 text-muted-foreground">AI değerlendirmesi</span>
+                              <Badge variant="outline" className={`max-w-full justify-self-start whitespace-normal break-words ${SEVERITY_CLASS[finding.probability]}`}>
+                                {finding.allowsElimination
+                                  ? `Açık eleme kuralı: ${SEVERITY_LABEL[finding.probability]}`
+                                  : `Hakem incelemesi gerekli: ${SEVERITY_LABEL[finding.probability]}`}
                               </Badge>
                             </div>
 
                             {decision ? (
                               <p className="text-base font-medium text-muted-foreground">
-                                {decision === "flagged"
+                                {decision === "flagged" && finding.allowsElimination
                                   ? "Elemeyi önerdin — bu karar değerlendirme kaydına eklenecek."
-                                  : "İncelemeye devam etmeyi seçtin."}
+                                  : "Hakem incelemesine devam etmeyi seçtin."}
                               </p>
                             ) : (
                               <div className="flex gap-2">
-                                <Button
-                                  type="button"
-                                  variant="destructive"
-                                  size="sm"
-                                  className="flex-1 gap-1.5"
-                                  onClick={() => requestFindingDecision(finding, "flagged")}
-                                >
-                                  <ThumbsDown className="size-4" />
-                                  ELEMEYİ ÖNER
-                                </Button>
+                                {finding.allowsElimination && (
+                                  <Button
+                                    type="button"
+                                    variant="destructive"
+                                    size="sm"
+                                    className="flex-1 gap-1.5"
+                                    onClick={() => requestFindingDecision(finding, "flagged")}
+                                  >
+                                    <ThumbsDown className="size-4" />
+                                    ELEMEYİ ÖNER
+                                  </Button>
+                                )}
                                 <Button
                                   type="button"
                                   variant="outline"
@@ -957,7 +1000,7 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
                                   onClick={() => requestFindingDecision(finding, "dismissed")}
                                 >
                                   <ThumbsUp className="size-4" />
-                                  İNCELEMEYE DEVAM ET
+                                  {finding.allowsElimination ? "İNCELEMEYE DEVAM ET" : "HAKEM İNCELEMESİNE AKTAR"}
                                 </Button>
                               </div>
                             )}
@@ -966,6 +1009,26 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
                       );
                     })}
                   </div>
+                )}
+
+                {analysis && (relevanceBlocked || relevanceUncertain) && (
+                  <Alert variant={relevanceBlocked ? "destructive" : "default"}>
+                    <ShieldAlert className="size-4" />
+                    <AlertTitle>
+                      {relevanceBlocked ? "Kategori/Problem Uyumsuzluğu" : "Kategori/Problem Eşleşmesi Belirsiz"}
+                    </AlertTitle>
+                    <AlertDescription className="space-y-2">
+                      <p>
+                        {relevanceBlocked
+                          ? "Raporun temel konusu, aktif yarışma problemiyle anlamlı biçimde eşleşmiyor. Normal puanlama durduruldu."
+                          : "Normal AI puanlaması durduruldu. Hakem incelemesi gerekiyor."}
+                      </p>
+                      <p>{analysis.relevanceAnalysis?.explanation}</p>
+                      {analysis.relevanceAnalysis?.reportExcerpt && (
+                        <p className="text-sm">Rapor kanıtı: {analysis.relevanceAnalysis.reportExcerpt}</p>
+                      )}
+                    </AlertDescription>
+                  </Alert>
                 )}
 
                 {analysisState === "done" && analysis && summaryCounts && (
@@ -1187,15 +1250,21 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
                               Aşama 7 – Kriter Bazlı AI Değerlendirmesi
                             </AccordionTrigger>
                             <AccordionContent className="space-y-2">
-                              {analysis.criteriaEvaluations.map((c) => (
-                                <CriterionEvaluationRow
-                                  key={c.id}
-                                  item={c}
-                                  analysis={analysis}
-                                  onEvidence={jumpToEvidence}
-                                  judgeScore={scores[c.id]}
-                                />
-                              ))}
+                              {analysis.relevanceAnalysis?.status !== "relevant" ? (
+                                <p className="rounded-lg bg-muted/40 p-3 text-base text-muted-foreground">
+                                  Puanlama yapılmadı; kategori/problem eşleşmesi için hakem incelemesi gerekiyor.
+                                </p>
+                              ) : (
+                                analysis.criteriaEvaluations.map((c) => (
+                                  <CriterionEvaluationRow
+                                    key={c.id}
+                                    item={c}
+                                    analysis={analysis}
+                                    onEvidence={jumpToEvidence}
+                                    judgeScore={scores[c.id]}
+                                  />
+                                ))
+                              )}
                             </AccordionContent>
                           </AccordionItem>
 

@@ -146,9 +146,12 @@ export interface AIEvaluationOutput {
   specificationAnalysis: {
     compliant: boolean;
     findings: Array<{
+      ruleId?: string;
+      ruleSourceLabel?: string;
       ruleText: string;
       findingText: string;
       severity: "low" | "medium" | "high";
+      classification?: "disqualification" | "requirement";
       pageNumber?: number;
       exactExcerpt?: string;
     }>;
@@ -168,9 +171,20 @@ export interface AIEvaluationOutput {
     exactExcerpt?: string;
   }>;
   categoryFit: { fit: boolean; reason: string };
+  relevanceAnalysis?: {
+    status: "relevant" | "uncertain" | "unrelated";
+    specificationRuleIds: string[];
+    reportPageNumber?: number;
+    reportExcerpt?: string;
+    explanation: string;
+    confidence: number;
+    mappedConcepts: string[];
+  };
+  overallComplianceStatus?: "compliant" | "non_compliant" | "needs_review" | "not_evaluated";
   criteriaEvaluations: Array<{
     criterionId: string;
     score: number | null;
+    scoreUnavailableReason?: "relevance_blocked" | "evidence_unverified" | "scale_missing";
     reason: string;
     evidence?: string;
     pageNumber?: number;
@@ -201,6 +215,7 @@ export interface AIEvaluationOutput {
   /** Sunucu tarafında doğrulanmış (gerçek sayfa metninde bulunan) kanıt alıntıları. */
   evidences: Evidence[];
   contextHash?: string;
+  evaluationPolicyVersion?: number;
 }
 
 export interface Report {
@@ -267,6 +282,8 @@ export interface ComplianceCheckItem {
   unverifiable?: boolean;
   /** Yalnızca gerçek bir ihlal/uyumsuzluk bulgusu için doldurulur — üç durumlu (✅/⚠/❌) gösterim için. */
   severity?: Severity;
+  decisionSupport?: "disqualification" | "requirement";
+  sourceLabel?: string;
 }
 
 export interface WritingStyleFlag {
@@ -314,6 +331,8 @@ export interface CriticalSpecFinding {
   findingText: string;
   probability: Severity;
   evidenceId: string | null;
+  classification?: "disqualification" | "requirement";
+  sourceLabel?: string;
 }
 
 export interface ContentAnalysis {
@@ -343,6 +362,7 @@ export interface CriterionAiEvaluation {
   id: string;
   label: string;
   score: number | null;
+  scoreUnavailableReason?: "relevance_blocked" | "evidence_unverified" | "scale_missing";
   maxScore?: number;
   reason: string;
   evidenceIds: string[];
@@ -353,6 +373,8 @@ export interface AIAnalysisResult {
   generatedAt: string;
   languageCheck: LanguageCheck;
   categoryFitCheck: CategoryFitCheck;
+  relevanceAnalysis?: AIEvaluationOutput["relevanceAnalysis"];
+  overallComplianceStatus?: AIEvaluationOutput["overallComplianceStatus"];
   ruleProfile: RuleProfile;
   criticalFindings: CriticalSpecFinding[];
   redFlags: RedFlag[];
