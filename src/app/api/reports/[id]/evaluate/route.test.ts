@@ -221,3 +221,27 @@ describe("POST /api/reports/[id]/evaluate — şartname opsiyonelliği", () => {
     );
   });
 });
+
+describe("POST /api/reports/[id]/evaluate — kriter semantic validation", () => {
+  it("rejects invalid criteria output without persisting it", async () => {
+    resolveReadiness.mockResolvedValue({
+      status: "fresh",
+      category: {
+        id: "cat-1",
+        name: "Test Kategorisi",
+        specificationText: undefined,
+        templateSections: [],
+      },
+      effectiveCriteria: [{ id: "c1", label: "Kriter 1", maxScore: 10 }],
+    });
+    evaluateReport.mockResolvedValue({
+      ...fakeSpecViolationOutput(),
+      criteriaEvaluations: [{ criterionId: "unknown", score: 8, reason: "iyi" }],
+    });
+
+    const res = await POST(makeRequest(), { params: Promise.resolve({ id: "report-1" }) });
+
+    expect(res.status).toBe(400);
+    expect(setAiEvaluation).not.toHaveBeenCalled();
+  });
+});
