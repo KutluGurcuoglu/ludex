@@ -55,6 +55,7 @@ model User {
   passwordHash             String
   fullName                 String
   phone                    String
+  phoneNormalized          String             @unique
   role                     Role               @default(CONTESTANT)
   judgeApprovalStatus      ApplicationStatus?
   judgeWorkStatus          JudgeWorkStatus?

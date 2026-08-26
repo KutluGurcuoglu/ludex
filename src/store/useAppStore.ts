@@ -3,6 +3,7 @@ import { useSession } from "next-auth/react";
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { hashPassword } from "@/lib/hash";
+import { normalizePhone } from "@/lib/auth/phone";
 import type {
   AppNotification,
   Category,
@@ -16,10 +17,6 @@ import type {
   User,
   UserRole,
 } from "@/types";
-
-function normalizePhone(phone: string) {
-  return phone.replace(/\D/g, "");
-}
 
 function createNotification(
   input: Omit<AppNotification, "id" | "createdAt" | "readAt">,
