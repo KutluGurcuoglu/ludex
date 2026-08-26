@@ -34,6 +34,7 @@ import {
 import { cn } from "@/lib/utils";
 import { RouteGuard } from "@/components/auth/route-guard";
 import { AppHeader } from "@/components/layout/app-header";
+import { AnnouncementsCard } from "@/components/announcements-card";
 import { AmbientGlow } from "@/components/landing/ambient-glow";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -869,6 +870,8 @@ function JudgeDashboard() {
                   </div>
                 )}
               </div>
+
+              <AnnouncementsCard />
 
               {myCategories.length === 0 ? (
                 <p className="rounded-xl border border-dashed border-border px-4 py-10 text-center text-base text-muted-foreground">

@@ -3,6 +3,7 @@ import { useSession } from "next-auth/react";
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { hashPassword } from "@/lib/hash";
+import { normalizePhone } from "@/lib/auth/phone";
 import type {
   AppNotification,
   Category,
@@ -16,10 +17,6 @@ import type {
   User,
   UserRole,
 } from "@/types";
-
-function normalizePhone(phone: string) {
-  return phone.replace(/\D/g, "");
-}
 
 function createNotification(
   input: Omit<AppNotification, "id" | "createdAt" | "readAt">,
@@ -442,6 +439,7 @@ export interface AppState {
   setUsers: (users: User[]) => void;
   setJudges: (judges: User[]) => void;
   setContestants: (contestants: User[]) => void;
+  setNotifications: (notifications: AppNotification[]) => void;
 
   markNotificationRead: (id: string) => void;
   markAllNotificationsRead: (userId: string) => void;
@@ -943,6 +941,7 @@ export const useAppStore = create<AppState>()(
       setUsers: (users) => set({ users }),
       setJudges: (judges) => set({ judges }),
       setContestants: (contestants) => set({ contestants }),
+      setNotifications: (notifications) => set({ notifications }),
 
       updateProfile: (userId, updates) => {
         set((state) => ({

@@ -1,5 +1,10 @@
 import { z } from "zod";
-import { evaluationOutputSchema, type EvaluationOutput } from "./schema";
+import {
+  evaluationOutputSchema,
+  relevanceAnalysisSchema,
+  type EvaluationOutput,
+  type RelevanceAnalysis,
+} from "./schema";
 import { fetchCloudflareStructuredJson } from "@/lib/ai-shared/cloudflare-workers-ai";
 
 export async function callAiEvaluation(
@@ -26,7 +31,7 @@ export async function callAiEvaluation(
     // tek bir alıntı) olduğundan, hiçbir alan kesilmeden (kriterler, şablon
     // bölümleri, bulgular, strengths/areasForImprovement/recommendations
     // dahil) tamamı için yeterli alan bırakır.
-    { model: "@cf/meta/llama-3.1-8b-instruct-fast", maxTokens: 8192 }
+    { model: "@cf/meta/llama-3.1-8b-instruct-fast", maxTokens: 12000 }
   );
 
   const parsedOutput = evaluationOutputSchema.safeParse(rawOutput);
@@ -36,5 +41,23 @@ export async function callAiEvaluation(
     });
   }
 
+  return parsedOutput.data;
+}
+
+export async function callAiRelevancePreflight(
+  systemPrompt: string,
+  userPrompt: string
+): Promise<RelevanceAnalysis> {
+  const rawOutput = await fetchCloudflareStructuredJson(
+    systemPrompt,
+    userPrompt,
+    z.toJSONSchema(relevanceAnalysisSchema),
+    { model: "@cf/meta/llama-3.1-8b-instruct-fast", maxTokens: 1_800 }
+  );
+
+  const parsedOutput = relevanceAnalysisSchema.safeParse(rawOutput);
+  if (!parsedOutput.success) {
+    throw new Error("Invalid AI relevance preflight output", { cause: parsedOutput.error });
+  }
   return parsedOutput.data;
 }

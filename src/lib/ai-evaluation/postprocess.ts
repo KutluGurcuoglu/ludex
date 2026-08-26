@@ -39,13 +39,21 @@ export function attachVerifiedEvidence(
   pages: ExtractedPage[] | null | undefined
 ): EvaluationOutput {
   const evidences: Evidence[] = [];
+  const usedEvidenceIds = new Set<string>();
+  const uniqueEvidenceId = (baseId: string): string => {
+    let id = baseId;
+    let suffix = 2;
+    while (usedEvidenceIds.has(id)) id = `${baseId}-${suffix++}`;
+    usedEvidenceIds.add(id);
+    return id;
+  };
 
   const specFindings = evaluation.specificationAnalysis.findings.map((finding, index) => {
     const verified = verifyExcerpt(pages, finding.pageNumber, finding.exactExcerpt);
     if (!verified) {
       return { ...finding, pageNumber: undefined, exactExcerpt: undefined };
     }
-    const id = `spec-${index}`;
+    const id = uniqueEvidenceId(`spec-${index}`);
     evidences.push({ id, page: verified.page, excerpt: verified.excerpt, note: finding.ruleText });
     return finding;
   });
@@ -55,7 +63,7 @@ export function attachVerifiedEvidence(
     if (!verified) {
       return { ...item, pageNumber: undefined, exactExcerpt: undefined };
     }
-    const id = `heading-${item.sectionId}`;
+    const id = uniqueEvidenceId(`heading-${item.sectionId}`);
     evidences.push({ id, page: verified.page, excerpt: verified.excerpt, note: item.notes });
     return item;
   });
@@ -65,7 +73,7 @@ export function attachVerifiedEvidence(
     if (!verified) {
       return { ...item, pageNumber: undefined, exactExcerpt: undefined };
     }
-    const id = `criterion-${item.criterionId}`;
+    const id = uniqueEvidenceId(`criterion-${item.criterionId}`);
     evidences.push({ id, page: verified.page, excerpt: verified.excerpt, note: item.evidence });
     return item;
   });

@@ -4,14 +4,30 @@ import { requireRole } from "@/lib/auth/require-role";
 import { getReportRepository } from "@/lib/repositories/report-repository";
 import { getScoreCriteriaRepository } from "@/lib/repositories/score-criteria-repository";
 import type { CategoryEvaluationCriterion } from "@/lib/repositories/category-repository";
-import { evaluateReport } from "@/lib/ai-evaluation/evaluate";
-import { findSimilarReports } from "@/lib/ai-evaluation/similarity";
+import { evaluateRelevancePreflight, evaluateReport } from "@/lib/ai-evaluation/evaluate";
+import { computeTextSimilarity, findSimilarReports } from "@/lib/ai-evaluation/similarity";
 import { attachVerifiedEvidence } from "@/lib/ai-evaluation/postprocess";
-import { computeContextHash } from "@/lib/ai-evaluation/context-hash";
+import {
+  deriveTemplateCompliance,
+  normalizeHeadingContentAnalysis,
+} from "@/lib/ai-evaluation/template-compliance";
+import { computeContextHash, EVALUATION_POLICY_VERSION } from "@/lib/ai-evaluation/context-hash";
 import { resolveReadiness } from "@/lib/ai-evaluation/readiness";
 import { toPageMarkedContent } from "@/lib/ai-evaluation/report-content";
-import { normalizeSpecificationAnalysis } from "@/lib/specification-compliance";
+import {
+  buildAuthoritativeSpecificationRules,
+  normalizeSpecificationAnalysis,
+  reconcileLanguageCompliance,
+  validateRelevanceAnalysis,
+  validateSpecificationFindings,
+} from "@/lib/specification-compliance";
+import { getTextExtractor } from "@/lib/text-extraction";
+import {
+  InvalidCriteriaEvaluationsError,
+  validateCriteriaEvaluations,
+} from "@/lib/ai-evaluation/criteria-validation";
 import type { ScoreCriterion } from "@/types";
+import type { EvaluationInput, EvaluationOutput, RelevanceAnalysis } from "@/lib/ai-evaluation/schema";
 
 /** Hakemin puanladığı efektif kriterleri (kategoriye özel ya da global), AI'nın beklediği şekle çevirir. */
 function toAiCriteria(criteria: ScoreCriterion[]): CategoryEvaluationCriterion[] {
@@ -21,6 +37,106 @@ function toAiCriteria(criteria: ScoreCriterion[]): CategoryEvaluationCriterion[]
     description: c.description?.trim() || c.label,
     maxScore: c.maxScore,
   }));
+}
+
+/** Strict enough to catch a copied blank template while preserving substantive reports. */
+const TEMPLATE_COPY_SIMILARITY_THRESHOLD_PERCENT = 90;
+
+/** Older records may contain the local view URL; extractors require the object key. */
+function toStorageKey(fileUrl: string): string {
+  const localStorageMarker = "/api/local-storage/";
+  const markerIndex = fileUrl.indexOf(localStorageMarker);
+  if (markerIndex >= 0) return fileUrl.slice(markerIndex + localStorageMarker.length);
+
+  try {
+    const parsed = new URL(fileUrl);
+    return parsed.pathname.replace(/^\/+/, "");
+  } catch {
+    return fileUrl;
+  }
+}
+
+async function applyTemplateCopyGuard(
+  evaluation: Awaited<ReturnType<typeof evaluateReport>>,
+  templateFileUrl: string | undefined,
+  reportText: string
+) {
+  if (!templateFileUrl) return evaluation;
+
+  try {
+    const storageKey = toStorageKey(templateFileUrl);
+    const { markdown } = await getTextExtractor().extractFromStorageObject(storageKey);
+    const similarity = computeTextSimilarity(reportText, markdown);
+    if (similarity < TEMPLATE_COPY_SIMILARITY_THRESHOLD_PERCENT) return evaluation;
+
+    return {
+      ...evaluation,
+      headingContentAnalysis: evaluation.headingContentAnalysis.map((item) => ({
+        ...item,
+        contentMatchesExpectation: false,
+        notes: `${item.notes} Rapor, boş şablonla çok yüksek benzerlik gösteriyor; bu bölümde yarışmacıya özgü içerik doğrulanamadı.`,
+      })),
+      templateAnalysis: {
+        ...evaluation.templateAnalysis,
+        compliant: false,
+        notes:
+          "Rapor, doldurulmamış rapor şablonunun kopyası gibi görünüyor; yarışmacıya özgü somut içerik bulunamadı.",
+      },
+    };
+  } catch (error) {
+    console.error(`Rapor şablonu kopya kontrolü başarısız (şablon ${templateFileUrl}):`, error);
+    return evaluation;
+  }
+}
+
+/**
+ * A non-relevant report must never spend a full model call generating scores
+ * that will be discarded. This deliberately carries only the preflight result
+ * forward; detailed template/language/criterion claims remain not evaluated.
+ */
+function createRelevanceBlockedEvaluation(
+  input: EvaluationInput,
+  relevanceAnalysis: RelevanceAnalysis
+): EvaluationOutput {
+  const reason =
+    relevanceAnalysis.status === "unrelated"
+      ? "Kategori/problem uyumsuzluğu nedeniyle normal AI puanlaması durduruldu."
+      : "Kategori/problem eşleşmesi belirsiz olduğu için normal AI puanlaması durduruldu.";
+
+  return {
+    languageAnalysis: {
+      detectedLanguage: "Bilinmiyor",
+      confidence: 0,
+      summary: "Kategori/problem uygunluğu ön kontrolünde normal dil değerlendirmesi yapılmadı.",
+      issues: [],
+    },
+    specificationAnalysis: { compliant: false, findings: [], notes: reason },
+    templateAnalysis: {
+      compliant: false,
+      missingSections: input.template.sections.map((section) => section.id),
+      notes: "Kategori/problem uygunluğu doğrulanmadan şablon içeriği değerlendirilmedi.",
+    },
+    headingContentAnalysis: input.template.sections.map((section) => ({
+      sectionId: section.id,
+      headingPresent: false,
+      contentMatchesExpectation: false,
+      notes: "Kategori/problem uygunluğu doğrulanmadan bölüm içeriği değerlendirilmedi.",
+    })),
+    categoryFit: { fit: false, reason: relevanceAnalysis.explanation },
+    relevanceAnalysis,
+    overallComplianceStatus: "needs_review",
+    criteriaEvaluations: input.evaluationCriteria.map((criterion) => ({
+      criterionId: criterion.id,
+      score: null,
+      scoreUnavailableReason: "relevance_blocked",
+      reason,
+    })),
+    strengths: [],
+    areasForImprovement: [],
+    recommendations: [],
+    similarReports: [],
+    evidences: [],
+  };
 }
 
 export async function POST(
@@ -71,18 +187,44 @@ export async function POST(
   const { category, effectiveCriteria } = readiness;
 
   const hasSpecification = Boolean(category.specificationText?.trim());
+  const authoritativeSpecificationRules = buildAuthoritativeSpecificationRules(
+    category.specificationText
+  );
 
   try {
-    const evaluation = await evaluateReport({
+    const evaluationInput: EvaluationInput = {
       reportContent: toPageMarkedContent(report),
       category: category.name,
       // Kategori uygunluğu (categoryFit) yalnızca kategori adına dayanmasın —
       // admin bir açıklama girdiyse gerçek bağlamı da AI'ya verilir.
       categoryDescription: category.description,
+      reportTitle: report.title,
       specificationContent: category.specificationText ?? undefined,
+      specificationRules: authoritativeSpecificationRules.map(({ id, text, sourceLabel }) => ({
+        id,
+        text,
+        sourceLabel,
+      })),
       template: { sections: category.templateSections },
       evaluationCriteria: toAiCriteria(effectiveCriteria),
-    });
+    };
+
+    // Relevance is a bounded preflight. A full criterion evaluation is made
+    // only after authoritative rule and report evidence confirm relevance.
+    const preflight = hasSpecification
+      ? validateRelevanceAnalysis(
+          await evaluateRelevancePreflight(evaluationInput),
+          authoritativeSpecificationRules,
+          report.extractedPages
+        )
+      : undefined;
+    const evaluation = preflight && preflight.status !== "relevant"
+      ? createRelevanceBlockedEvaluation(evaluationInput, preflight)
+      : await evaluateReport(evaluationInput);
+
+    if (preflight) evaluation.relevanceAnalysis = preflight;
+
+    validateCriteriaEvaluations(evaluation.criteriaEvaluations, effectiveCriteria);
 
     // Şartname yüklenmemişse, AI prompt'a "ihlal uydurma" talimatı verilmiş
     // olsa da bu bir garanti değildir — sunucu tarafı invariant: şartname
@@ -91,13 +233,85 @@ export async function POST(
     // yüklemediği için yarışmacı bu yüzden asla "ihlal etmiş" sayılamaz.
     evaluation.specificationAnalysis = normalizeSpecificationAnalysis(
       evaluation.specificationAnalysis,
-      hasSpecification
+      hasSpecification,
+      evaluation.languageAnalysis
     );
+    evaluation.languageAnalysis = reconcileLanguageCompliance(
+      evaluation.languageAnalysis,
+      category.specificationText
+    );
+    if (hasSpecification) {
+      const validatedSpecification = validateSpecificationFindings(
+        evaluation.specificationAnalysis,
+        authoritativeSpecificationRules,
+        report.extractedPages
+      );
+      evaluation.specificationAnalysis = validatedSpecification.analysis;
+      evaluation.areasForImprovement = [
+        ...new Set([
+          ...evaluation.areasForImprovement,
+          ...validatedSpecification.technicalWeaknesses,
+        ]),
+      ];
+      evaluation.relevanceAnalysis = validateRelevanceAnalysis(
+        evaluation.relevanceAnalysis,
+        authoritativeSpecificationRules,
+        report.extractedPages
+      );
+      if (evaluation.relevanceAnalysis.status !== "relevant") {
+        evaluation.criteriaEvaluations = evaluation.criteriaEvaluations.map((criterion) => ({
+          ...criterion,
+          score: null,
+          scoreUnavailableReason: "relevance_blocked",
+          reason:
+            evaluation.relevanceAnalysis.status === "unrelated"
+              ? "Kategori/problem uyumsuzluğu nedeniyle normal kriter puanlaması durduruldu."
+              : "Kategori/problem eşleşmesi belirsiz olduğu için hakem incelemesi gereklidir.",
+          evidence: undefined,
+          pageNumber: undefined,
+          exactExcerpt: undefined,
+        }));
+      }
+    }
+
+    const guardedEvaluation = await applyTemplateCopyGuard(
+      evaluation,
+      category.reportTemplate?.fileUrl,
+      report.extractedText ?? ""
+    );
+
+    const normalizedHeadings = normalizeHeadingContentAnalysis(
+      category.templateSections,
+      guardedEvaluation.headingContentAnalysis
+    );
+    guardedEvaluation.headingContentAnalysis = normalizedHeadings.items;
 
     // Sunucu, AI'nın söylediği pageNumber/exactExcerpt'e körü körüne
     // güvenmez — her iddiayı raporun gerçek sayfa metnine karşı doğrular ve
     // doğrulanamayanları sonuçtan çıkarır (bkz. postprocess.ts).
-    const verifiedEvaluation = attachVerifiedEvidence(evaluation, report.extractedPages);
+    const verifiedEvaluation = attachVerifiedEvidence(guardedEvaluation, report.extractedPages);
+    verifiedEvaluation.templateAnalysis = deriveTemplateCompliance(
+      category.templateSections,
+      verifiedEvaluation.headingContentAnalysis,
+      verifiedEvaluation.templateAnalysis.notes,
+      normalizedHeadings.issues
+    );
+    const relevanceStatus = verifiedEvaluation.relevanceAnalysis?.status ?? "relevant";
+    verifiedEvaluation.overallComplianceStatus =
+      relevanceStatus !== "relevant"
+        ? "needs_review"
+        : !verifiedEvaluation.templateAnalysis.compliant || !verifiedEvaluation.specificationAnalysis.compliant
+          ? "non_compliant"
+          : verifiedEvaluation.languageAnalysis.issues.length > 0
+            ? "needs_review"
+            : "compliant";
+    if (verifiedEvaluation.overallComplianceStatus === "needs_review") {
+      verifiedEvaluation.specificationAnalysis = {
+        ...verifiedEvaluation.specificationAnalysis,
+        compliant: false,
+        notes: "Şartname uygunluğu doğrulanamadı. Kategori/problem eşleşmesi için hakem incelemesi gerekiyor.",
+      };
+    }
 
     // criterionId yalnızca bir id'dir (genelde UUID) — UI'nın gösterebileceği
     // gerçek kriter adı/maxScore'u, hakemin puanlarken kullandığı AYNI
@@ -107,6 +321,13 @@ export async function POST(
       ...c,
       criterionLabel: criteriaById.get(c.criterionId)?.label,
       criterionMaxScore: criteriaById.get(c.criterionId)?.maxScore,
+      ...(c.score != null && c.score > 0 && !(c.pageNumber && c.exactExcerpt)
+        ? {
+            score: null,
+            scoreUnavailableReason: "evidence_unverified",
+            reason: "Pozitif kriter puanı için doğrulanmış rapor kanıtı bulunamadı.",
+          }
+        : {}),
     }));
 
     // Benzerlik LLM tarafından üretilmez — deterministik olarak burada
@@ -141,6 +362,7 @@ export async function POST(
       similarReports,
       similarityScore: similarReports[0]?.matchPercentage,
       contextHash,
+      evaluationPolicyVersion: EVALUATION_POLICY_VERSION,
     };
 
     await reportRepository.setAiEvaluation(report.id, enrichedEvaluation);
@@ -150,6 +372,12 @@ export async function POST(
 
     return NextResponse.json({ success: true, evaluation: enrichedEvaluation });
   } catch (error) {
+    if (error instanceof InvalidCriteriaEvaluationsError) {
+      return NextResponse.json(
+        { error: "Geçersiz kriter değerlendirmesi.", details: error.message },
+        { status: 400 }
+      );
+    }
     if (error instanceof z.ZodError) {
       return NextResponse.json(
         { error: "Geçersiz değerlendirme girdisi.", issues: error.issues },

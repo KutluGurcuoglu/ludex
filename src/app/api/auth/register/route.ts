@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { getUserRepository } from "@/lib/repositories/user-repository";
+import type { UserRecord } from "@/lib/repositories/user-repository";
 import { hashPassword } from "@/lib/auth/password";
 import { registerInputSchema } from "@/lib/auth/schema";
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
@@ -41,8 +43,31 @@ export async function POST(req: Request) {
     );
   }
 
+  const existingPhone = await userRepository.findByPhone(phone);
+  if (existingPhone) {
+    return NextResponse.json(
+      { error: "Bu telefon numarasıyla zaten bir hesap var." },
+      { status: 409 }
+    );
+  }
+
   const passwordHash = await hashPassword(password);
-  const user = await userRepository.create({ name, email, phone, role, passwordHash });
+  let user: UserRecord;
+  try {
+    user = await userRepository.create({ name, email, phone, role, passwordHash });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      const target = Array.isArray(error.meta?.target) ? error.meta.target.join(",") : "";
+      const isPhoneConflict = target.includes("phoneNormalized");
+      return NextResponse.json(
+        { error: isPhoneConflict
+            ? "Bu telefon numarasıyla zaten bir hesap var."
+            : "Bu e-posta ile zaten bir hesap var." },
+        { status: 409 }
+      );
+    }
+    throw error;
+  }
 
   return NextResponse.json(
     {

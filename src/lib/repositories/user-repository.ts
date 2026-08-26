@@ -1,5 +1,6 @@
 import { ApplicationStatus, JudgeWorkStatus as PrismaJudgeWorkStatus, Prisma, Role } from "@prisma/client";
 import { db } from "@/lib/db";
+import { normalizePhone } from "@/lib/auth/phone";
 import type { JudgeApprovalStatus, JudgeWorkStatus, UserRole } from "@/types";
 
 export interface UserRecord {
@@ -48,6 +49,7 @@ export interface CreateUserInput {
  */
 export interface UserRepository {
   findByEmail(email: string): Promise<UserRecord | null>;
+  findByPhone(phone: string): Promise<UserRecord | null>;
   findById(id: string): Promise<UserRecord | null>;
   create(input: CreateUserInput): Promise<UserRecord>;
   listJudges(): Promise<UserRecord[]>;
@@ -172,6 +174,14 @@ class PrismaUserRepository implements UserRepository {
     return user ? toUserRecord(user) : null;
   }
 
+  async findByPhone(phone: string): Promise<UserRecord | null> {
+    const user = await db.user.findUnique({
+      where: { phoneNormalized: normalizePhone(phone) },
+      ...userWithCategories,
+    });
+    return user ? toUserRecord(user) : null;
+  }
+
   async findById(id: string): Promise<UserRecord | null> {
     const user = await db.user.findUnique({ where: { id }, ...userWithCategories });
     return user ? toUserRecord(user) : null;
@@ -183,6 +193,7 @@ class PrismaUserRepository implements UserRepository {
         email: normalizeEmail(input.email),
         fullName: input.name,
         phone: input.phone,
+        phoneNormalized: normalizePhone(input.phone),
         role: ROLE_TO_PRISMA[input.role],
         passwordHash: input.passwordHash,
         ...(input.role === "judge" ? { judgeApprovalStatus: ApplicationStatus.PENDING } : {}),

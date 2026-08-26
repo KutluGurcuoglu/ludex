@@ -34,9 +34,29 @@ export function toAIAnalysisResult(
   output: AIEvaluationOutput,
   hasSpecification: boolean
 ): AIAnalysisResult {
+  // Old cached analyses may predate server-side normalization. Keep the UI
+  // safe and conservative even when such a record is opened directly.
+  const headingItemsById = new Map<string, (typeof output.headingContentAnalysis)[number]>();
+  const duplicateHeadingIds = new Set<string>();
+  for (const item of output.headingContentAnalysis) {
+    if (headingItemsById.has(item.sectionId)) duplicateHeadingIds.add(item.sectionId);
+    else headingItemsById.set(item.sectionId, item);
+  }
+  const headingContentAnalysis = [...headingItemsById.values()].map((item) =>
+    duplicateHeadingIds.has(item.sectionId)
+      ? {
+          ...item,
+          headingPresent: false,
+          contentMatchesExpectation: false,
+          notes: `${item.notes} Birden fazla kayıt bulundu; uygunluk doğrulanamadı.`,
+        }
+      : item
+  );
+
   const specificationAnalysis = normalizeSpecificationAnalysis(
     output.specificationAnalysis,
-    hasSpecification
+    hasSpecification,
+    output.languageAnalysis
   );
 
   const specCompliance: ComplianceCheckItem[] =
@@ -57,25 +77,37 @@ export function toAIAnalysisResult(
             id,
             label: finding.ruleText,
             passed: false,
-            detail: finding.findingText,
+          detail: finding.findingText,
             evidenceIds: hasEvidence ? [id] : [],
             unverifiable: !hasEvidence,
-            severity: finding.severity,
+          severity: finding.severity,
+          decisionSupport: finding.classification,
+          sourceLabel: finding.ruleSourceLabel,
           };
         });
 
   const criticalFindings: CriticalSpecFinding[] = specificationAnalysis.findings
     .map((finding, index) => ({ finding, index }))
-    .filter(({ finding }) => finding.severity === "high")
-    .map(({ finding, index }) => ({
-      id: `spec-${index}`,
-      ruleText: finding.ruleText,
-      findingText: finding.findingText,
-      probability: finding.severity,
-      evidenceId: `spec-${index}`,
-    }));
+    .filter(
+      ({ finding }) =>
+        finding.classification === "disqualification" &&
+        Boolean(finding.pageNumber && finding.exactExcerpt)
+    )
+    .map(({ finding, index }) => {
+      const id = `spec-${index}`;
+      const hasEvidence = Boolean(finding.pageNumber && finding.exactExcerpt);
+      return {
+        id,
+        ruleText: finding.ruleText,
+        findingText: finding.findingText,
+        probability: finding.severity,
+        evidenceId: hasEvidence ? id : null,
+        classification: finding.classification,
+        sourceLabel: finding.ruleSourceLabel,
+      };
+    });
 
-  const templateCompliance: ComplianceCheckItem[] = output.headingContentAnalysis.map((h) => {
+  const templateCompliance: ComplianceCheckItem[] = headingContentAnalysis.map((h) => {
     const id = `heading-${h.sectionId}`;
     const hasEvidence = Boolean(h.pageNumber && h.exactExcerpt);
     const missing = output.templateAnalysis.missingSections.includes(h.sectionId);
@@ -90,6 +122,18 @@ export function toAIAnalysisResult(
       unverifiable: !hasEvidence && (missing || !h.headingPresent),
     };
   });
+  const existingTemplateSectionIds = new Set(headingContentAnalysis.map((section) => section.sectionId));
+  for (const sectionId of output.templateAnalysis.missingSections) {
+    if (existingTemplateSectionIds.has(sectionId)) continue;
+    templateCompliance.push({
+      id: `heading-${sectionId}`,
+      label: sectionId,
+      passed: false,
+      detail: "Bölüm raporda bulunamadı.",
+      evidenceIds: [],
+      unverifiable: true,
+    });
+  }
 
   const criteriaEvaluations: CriterionAiEvaluation[] = output.criteriaEvaluations.map((c) => {
     const id = `criterion-${c.criterionId}`;
@@ -98,6 +142,8 @@ export function toAIAnalysisResult(
       id: c.criterionId,
       label: c.criterionLabel ?? c.criterionId,
       score: c.score,
+      scoreUnavailableReason:
+        c.score != null ? undefined : c.scoreUnavailableReason ?? (c.criterionMaxScore ? "evidence_unverified" : "scale_missing"),
       maxScore: c.criterionMaxScore,
       reason: c.reason,
       evidenceIds: hasEvidence ? [id] : [],
@@ -122,6 +168,8 @@ export function toAIAnalysisResult(
       passed: output.categoryFit.fit,
       explanation: output.categoryFit.reason,
     },
+    relevanceAnalysis: output.relevanceAnalysis,
+    overallComplianceStatus: output.overallComplianceStatus,
 
     ruleProfile: { prohibitions: [], requirements: [], technicalRules: [] },
     criticalFindings,
@@ -139,7 +187,9 @@ export function toAIAnalysisResult(
 
     similarReports: output.similarReports,
     similarityScore: output.similarityScore,
-    evidences: output.evidences,
+    evidences: output.evidences.filter(
+      (evidence, index, all) => all.findIndex((candidate) => candidate.id === evidence.id) === index
+    ),
   };
 }
 
