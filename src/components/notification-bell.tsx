@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Bell, Mail } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -12,6 +12,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useAppStore, useCurrentUser } from "@/store/useAppStore";
+import { getNotifications } from "@/services/notifications.service";
 
 function timeAgo(iso: string) {
   const minutes = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
@@ -27,7 +28,16 @@ export function NotificationBell() {
   const notifications = useAppStore((s) => s.notifications);
   const markNotificationRead = useAppStore((s) => s.markNotificationRead);
   const markAllNotificationsRead = useAppStore((s) => s.markAllNotificationsRead);
+  const setNotifications = useAppStore((s) => s.setNotifications);
   const [open, setOpen] = useState(false);
+  const userId = user?.id;
+
+  useEffect(() => {
+    if (!userId) return;
+    getNotifications().then(setNotifications).catch((error) => {
+      console.error("Bildirimler yüklenemedi:", error);
+    });
+  }, [userId, setNotifications]);
 
   const myNotifications = useMemo(
     () =>

@@ -439,6 +439,7 @@ export interface AppState {
   setUsers: (users: User[]) => void;
   setJudges: (judges: User[]) => void;
   setContestants: (contestants: User[]) => void;
+  setNotifications: (notifications: AppNotification[]) => void;
 
   markNotificationRead: (id: string) => void;
   markAllNotificationsRead: (userId: string) => void;
@@ -940,6 +941,7 @@ export const useAppStore = create<AppState>()(
       setUsers: (users) => set({ users }),
       setJudges: (judges) => set({ judges }),
       setContestants: (contestants) => set({ contestants }),
+      setNotifications: (notifications) => set({ notifications }),
 
       updateProfile: (userId, updates) => {
         set((state) => ({
