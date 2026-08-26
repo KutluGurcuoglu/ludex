@@ -26,6 +26,7 @@ import {
   InvalidCriteriaEvaluationsError,
   validateCriteriaEvaluations,
 } from "@/lib/ai-evaluation/criteria-validation";
+import { CloudflareAiTimeoutError } from "@/lib/ai-shared/cloudflare-workers-ai";
 import type { ScoreCriterion } from "@/types";
 import type { EvaluationInput, EvaluationOutput, RelevanceAnalysis } from "@/lib/ai-evaluation/schema";
 
@@ -41,6 +42,29 @@ function toAiCriteria(criteria: ScoreCriterion[]): CategoryEvaluationCriterion[]
 
 /** Strict enough to catch a copied blank template while preserving substantive reports. */
 const TEMPLATE_COPY_SIMILARITY_THRESHOLD_PERCENT = 90;
+
+type AiPerfTimings = {
+  readiness: number;
+  preflight: number;
+  evaluation: number;
+  postprocess: number;
+  persistence: number;
+};
+
+function elapsedMs(startedAt: number): number {
+  return Math.round(performance.now() - startedAt);
+}
+
+function logAiPerformance(
+  reportId: string,
+  timings: AiPerfTimings,
+  totalStartedAt: number,
+  outcome: string
+) {
+  console.info(
+    `[AI PERF] report=${reportId} readiness=${timings.readiness}ms preflight=${timings.preflight}ms evaluation=${timings.evaluation}ms postprocess=${timings.postprocess}ms persistence=${timings.persistence}ms total=${elapsedMs(totalStartedAt)}ms outcome=${outcome}`
+  );
+}
 
 /** Older records may contain the local view URL; extractors require the object key. */
 function toStorageKey(fileUrl: string): string {
@@ -140,7 +164,7 @@ function createRelevanceBlockedEvaluation(
 }
 
 export async function POST(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const session = await requireRole("admin", "judge");
@@ -149,14 +173,28 @@ export async function POST(
   }
 
   const { id } = await params;
+  const force = new URL(req.url).searchParams.get("force") === "true";
+  const totalStartedAt = performance.now();
+  const readinessStartedAt = performance.now();
+  const timings: AiPerfTimings = {
+    readiness: 0,
+    preflight: 0,
+    evaluation: 0,
+    postprocess: 0,
+    persistence: 0,
+  };
   const reportRepository = getReportRepository();
   const report = await reportRepository.findById(id);
   if (!report) {
+    timings.readiness = elapsedMs(readinessStartedAt);
+    logAiPerformance(id, timings, totalStartedAt, "not_found");
     return NextResponse.json({ error: "Rapor bulunamadı." }, { status: 404 });
   }
 
   // Hakem yalnızca kendisine atanmış raporu değerlendirebilir; admin her raporu tetikleyebilir.
   if (session.user.role === "judge" && !report.assignedJudgeIds.includes(session.user.id)) {
+    timings.readiness = elapsedMs(readinessStartedAt);
+    logAiPerformance(id, timings, totalStartedAt, "forbidden");
     return NextResponse.json({ error: "Bu rapor size atanmamış." }, { status: 403 });
   }
 
@@ -169,27 +207,41 @@ export async function POST(
   // (resolveReadiness) paylaşılır — mesajlar iki yerde de aynı kalır.
   const globalCriteria = await getScoreCriteriaRepository().listAll();
   const readiness = await resolveReadiness(report, globalCriteria);
+  timings.readiness = elapsedMs(readinessStartedAt);
 
   if (readiness.status === "missing_text") {
+    logAiPerformance(id, timings, totalStartedAt, readiness.status);
     return NextResponse.json({ error: readiness.message }, { status: 409 });
   }
   if (readiness.status === "category_not_found") {
+    logAiPerformance(id, timings, totalStartedAt, readiness.status);
     return NextResponse.json({ error: readiness.message }, { status: 404 });
   }
   if (readiness.status === "missing_template" || readiness.status === "missing_criteria") {
+    logAiPerformance(id, timings, totalStartedAt, readiness.status);
     return NextResponse.json({ error: readiness.message }, { status: 409 });
   }
 
-  // Buraya ulaşıldıysa readiness.status "ready_not_started" | "stale" | "fresh"
-  // — /evaluate'in görevi zaten (yeniden) analiz üretmek olduğu için bu üç
-  // durumun hepsinde de değerlendirmeye devam edilir (stale/ready_not_started
-  // yalnızca salt-okunur ekranlar — Copilot, hakem uyarısı — için bir sinyaldir).
+  // Fresh sonuç hem admin hem hakem için aynı kalıcı AIAnalysis kaydıdır.
+  // İstemcilerin cache kontrolünü atladığı doğrudan/tekrarlı POST'larda da
+  // Cloudflare'e gereksiz ikinci bir çağrı göndermeyiz. Yalnızca kullanıcının
+  // açık yeniden-çalıştırma niyetini taşıyan ?force=true bu kısa devreyi
+  // bypass eder. Stale ve henüz başlamamış analizler force gerektirmeden
+  // aşağıdaki gerçek pipeline'da yeniden üretilir.
+  if (!force && readiness.status === "fresh" && report.aiEvaluation) {
+    logAiPerformance(id, timings, totalStartedAt, "cache_hit");
+    return NextResponse.json({ success: true, evaluation: report.aiEvaluation, cached: true });
+  }
+
   const { category, effectiveCriteria } = readiness;
 
   const hasSpecification = Boolean(category.specificationText?.trim());
   const authoritativeSpecificationRules = buildAuthoritativeSpecificationRules(
     category.specificationText
   );
+
+  let postprocessStartedAt: number | null = null;
+  let postprocessFinished = false;
 
   try {
     const evaluationInput: EvaluationInput = {
@@ -211,18 +263,35 @@ export async function POST(
 
     // Relevance is a bounded preflight. A full criterion evaluation is made
     // only after authoritative rule and report evidence confirm relevance.
-    const preflight = hasSpecification
-      ? validateRelevanceAnalysis(
+    let preflight: RelevanceAnalysis | undefined;
+    if (hasSpecification) {
+      const preflightStartedAt = performance.now();
+      try {
+        preflight = validateRelevanceAnalysis(
           await evaluateRelevancePreflight(evaluationInput),
           authoritativeSpecificationRules,
           report.extractedPages
-        )
-      : undefined;
-    const evaluation = preflight && preflight.status !== "relevant"
-      ? createRelevanceBlockedEvaluation(evaluationInput, preflight)
-      : await evaluateReport(evaluationInput);
+        );
+      } finally {
+        timings.preflight = elapsedMs(preflightStartedAt);
+      }
+    }
+
+    let evaluation: EvaluationOutput;
+    if (preflight && preflight.status !== "relevant") {
+      evaluation = createRelevanceBlockedEvaluation(evaluationInput, preflight);
+    } else {
+      const evaluationStartedAt = performance.now();
+      try {
+        evaluation = await evaluateReport(evaluationInput);
+      } finally {
+        timings.evaluation = elapsedMs(evaluationStartedAt);
+      }
+    }
 
     if (preflight) evaluation.relevanceAnalysis = preflight;
+
+    postprocessStartedAt = performance.now();
 
     validateCriteriaEvaluations(evaluation.criteriaEvaluations, effectiveCriteria);
 
@@ -365,26 +434,53 @@ export async function POST(
       evaluationPolicyVersion: EVALUATION_POLICY_VERSION,
     };
 
-    await reportRepository.setAiEvaluation(report.id, enrichedEvaluation);
-    if (report.status === "assigned") {
-      await reportRepository.setStatus(report.id, "in_review");
+    timings.postprocess = elapsedMs(postprocessStartedAt);
+    postprocessFinished = true;
+
+    const persistenceStartedAt = performance.now();
+    try {
+      await reportRepository.setAiEvaluation(report.id, enrichedEvaluation);
+      if (report.status === "assigned") {
+        await reportRepository.setStatus(report.id, "in_review");
+      }
+    } finally {
+      timings.persistence = elapsedMs(persistenceStartedAt);
     }
 
+    logAiPerformance(id, timings, totalStartedAt, "success");
     return NextResponse.json({ success: true, evaluation: enrichedEvaluation });
   } catch (error) {
+    if (postprocessStartedAt !== null && !postprocessFinished) {
+      timings.postprocess = elapsedMs(postprocessStartedAt);
+    }
+
     if (error instanceof InvalidCriteriaEvaluationsError) {
+      logAiPerformance(id, timings, totalStartedAt, "invalid_criteria");
       return NextResponse.json(
         { error: "Geçersiz kriter değerlendirmesi.", details: error.message },
         { status: 400 }
       );
     }
     if (error instanceof z.ZodError) {
+      logAiPerformance(id, timings, totalStartedAt, "invalid_input");
       return NextResponse.json(
         { error: "Geçersiz değerlendirme girdisi.", issues: error.issues },
         { status: 400 }
       );
     }
+    if (error instanceof CloudflareAiTimeoutError) {
+      logAiPerformance(id, timings, totalStartedAt, "timeout");
+      console.error(`AI değerlendirme zaman aşımı (report ${report.id}).`);
+      const cacheNote = report.aiEvaluation ? " Mevcut başarılı analiz korundu." : "";
+      return NextResponse.json(
+        {
+          error: `AI sağlayıcısı 90 saniye içinde yanıt veremedi.${cacheNote} Lütfen tekrar deneyin.`,
+        },
+        { status: 504 }
+      );
+    }
 
+    logAiPerformance(id, timings, totalStartedAt, "error");
     console.error(`AI değerlendirme hatası (report ${report.id}):`, error);
     return NextResponse.json({ error: "AI değerlendirmesi başarısız oldu." }, { status: 500 });
   }

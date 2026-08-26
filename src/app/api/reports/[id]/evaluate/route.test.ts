@@ -60,6 +60,7 @@ vi.mock("@/lib/text-extraction", () => ({
 // uygulandığını gerçek davranışıyla doğrulamak için gerçek import kullanılıyor.
 
 import { POST } from "./route";
+import { CloudflareAiTimeoutError } from "@/lib/ai-shared/cloudflare-workers-ai";
 
 const REPORT = {
   id: "report-1",
@@ -97,8 +98,11 @@ function fakeSpecViolationOutput() {
   };
 }
 
-function makeRequest() {
-  return new Request("http://localhost/api/reports/report-1/evaluate", { method: "POST" });
+function makeRequest(options?: { force?: boolean }) {
+  const forceQuery = options?.force ? "?force=true" : "";
+  return new Request(`http://localhost/api/reports/report-1/evaluate${forceQuery}`, {
+    method: "POST",
+  });
 }
 
 beforeEach(() => {
@@ -421,5 +425,108 @@ describe("POST /api/reports/[id]/evaluate — kriter semantic validation", () =>
 
     expect(res.status).toBe(400);
     expect(setAiEvaluation).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/reports/[id]/evaluate — cache ve timeout", () => {
+  function readyCategory() {
+    return {
+      id: "cat-1",
+      name: "Test Kategorisi",
+      specificationText: undefined,
+      templateSections: [{ id: "sec-1", title: "Giriş", expectedContent: "Amaç." }],
+    };
+  }
+
+  it("returns a fresh cached AIAnalysis without calling Cloudflare or persistence", async () => {
+    const cachedEvaluation = fakeSpecViolationOutput();
+    findById.mockResolvedValue({ ...REPORT, aiEvaluation: cachedEvaluation });
+    resolveReadiness.mockResolvedValue({
+      status: "fresh",
+      category: readyCategory(),
+      effectiveCriteria: [{ id: "c1", label: "Kriter 1", maxScore: 10 }],
+    });
+
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const res = await POST(makeRequest(), { params: Promise.resolve({ id: "report-1" }) });
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body).toMatchObject({ success: true, cached: true, evaluation: cachedEvaluation });
+    expect(evaluateRelevancePreflight).not.toHaveBeenCalled();
+    expect(evaluateReport).not.toHaveBeenCalled();
+    expect(setAiEvaluation).not.toHaveBeenCalled();
+    expect(info).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /^\[AI PERF\] report=report-1 readiness=\d+ms preflight=0ms evaluation=0ms postprocess=0ms persistence=0ms total=\d+ms outcome=cache_hit$/
+      )
+    );
+    info.mockRestore();
+  });
+
+  it("reruns and persists a fresh analysis when force=true", async () => {
+    const cachedEvaluation = { ...fakeSpecViolationOutput(), strengths: ["Eski sonuç."] };
+    const newEvaluation = { ...fakeSpecViolationOutput(), strengths: ["Yeni sonuç."] };
+    findById.mockResolvedValue({ ...REPORT, aiEvaluation: cachedEvaluation });
+    resolveReadiness.mockResolvedValue({
+      status: "fresh",
+      category: readyCategory(),
+      effectiveCriteria: [{ id: "c1", label: "Kriter 1", maxScore: 10 }],
+    });
+    evaluateReport.mockResolvedValue(newEvaluation);
+
+    const res = await POST(makeRequest({ force: true }), {
+      params: Promise.resolve({ id: "report-1" }),
+    });
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.cached).toBeUndefined();
+    expect(body.evaluation.strengths).toEqual(["Yeni sonuç."]);
+    expect(evaluateReport).toHaveBeenCalledTimes(1);
+    expect(setAiEvaluation).toHaveBeenCalledTimes(1);
+    expect(setAiEvaluation.mock.calls[0][1].strengths).toEqual(["Yeni sonuç."]);
+  });
+
+  it("reruns a stale analysis without requiring force", async () => {
+    const cachedEvaluation = { ...fakeSpecViolationOutput(), strengths: ["Eski sonuç."] };
+    findById.mockResolvedValue({ ...REPORT, aiEvaluation: cachedEvaluation });
+    resolveReadiness.mockResolvedValue({
+      status: "stale",
+      message: "Yönergeler değişti.",
+      category: readyCategory(),
+      effectiveCriteria: [{ id: "c1", label: "Kriter 1", maxScore: 10 }],
+    });
+    evaluateReport.mockResolvedValue({ ...fakeSpecViolationOutput(), strengths: ["Yeni sonuç."] });
+
+    const res = await POST(makeRequest(), { params: Promise.resolve({ id: "report-1" }) });
+
+    expect(res.status).toBe(200);
+    expect(evaluateReport).toHaveBeenCalledTimes(1);
+    expect(setAiEvaluation).toHaveBeenCalledTimes(1);
+    expect(setAiEvaluation.mock.calls[0][1].strengths).toEqual(["Yeni sonuç."]);
+  });
+
+  it("preserves the previous successful cache when a forced fresh rerun times out", async () => {
+    const cachedEvaluation = fakeSpecViolationOutput();
+    findById.mockResolvedValue({ ...REPORT, aiEvaluation: cachedEvaluation });
+    resolveReadiness.mockResolvedValue({
+      status: "fresh",
+      category: readyCategory(),
+      effectiveCriteria: [{ id: "c1", label: "Kriter 1", maxScore: 10 }],
+    });
+    evaluateReport.mockRejectedValue(new CloudflareAiTimeoutError());
+
+    const res = await POST(makeRequest({ force: true }), {
+      params: Promise.resolve({ id: "report-1" }),
+    });
+    const body = await res.json();
+
+    expect(res.status).toBe(504);
+    expect(body.error).toContain("90 saniye içinde yanıt veremedi");
+    expect(body.error).toContain("Mevcut başarılı analiz korundu");
+    expect(evaluateReport).toHaveBeenCalledTimes(1);
+    expect(setAiEvaluation).not.toHaveBeenCalled();
+    expect(setStatus).not.toHaveBeenCalled();
   });
 });

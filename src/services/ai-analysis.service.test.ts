@@ -206,6 +206,36 @@ describe("toAIAnalysisResult — eksik şablon bölümleri", () => {
  * hata yanıtı döndüğü senaryoda bu sözleşmenin hâlâ doğru çalıştığını doğrular.
  */
 describe("getAIAnalysis", () => {
+  it("adds force=true only for an explicit rerun", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ evaluation: evaluationWithFakeSpecViolation() }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getAIAnalysis("report-1", true, { force: true });
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/reports/report-1/evaluate?force=true", {
+      method: "POST",
+    });
+  });
+
+  it("keeps normal analysis requests cacheable by omitting force", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ evaluation: evaluationWithFakeSpecViolation() }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getAIAnalysis("report-1", true);
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/reports/report-1/evaluate", {
+      method: "POST",
+    });
+  });
+
   it("rejects with the server's error message when /evaluate responds with a failure status", async () => {
     vi.stubGlobal(
       "fetch",

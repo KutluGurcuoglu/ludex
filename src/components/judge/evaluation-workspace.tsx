@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Document, Page, pdfjs } from "react-pdf";
@@ -296,6 +296,7 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
   const [analysisState, setAnalysisState] = useState<AnalysisState>("idle");
   const [analysis, setAnalysis] = useState<AIAnalysisResult | null>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const retryAnalysisWithForce = useRef(false);
   const [copilotOpen, setCopilotOpen] = useState(false);
   const [compactCompliance, setCompactCompliance] = useState(false);
 
@@ -473,13 +474,15 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
     revealResults();
   }
 
-  async function handleStartAnalysis() {
+  async function handleStartAnalysis(options?: { force?: boolean }) {
+    const force = options?.force === true;
+    retryAnalysisWithForce.current = force;
     setAnalysisState("checking");
     setAnalysisError(null);
 
     let result: AIAnalysisResult;
     try {
-      result = await aiAnalysisService.getAIAnalysis(reportId, hasSpecification);
+      result = await aiAnalysisService.getAIAnalysis(reportId, hasSpecification, { force });
     } catch (error) {
       setAnalysisState("error");
       setAnalysisError(error instanceof Error ? error.message : "AI analizi başlatılamadı.");
@@ -814,7 +817,7 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
                         </p>
                       </div>
                       <Button
-                        onClick={handleStartAnalysis}
+                        onClick={() => handleStartAnalysis()}
                         className="mt-2 gap-2 transition-transform active:scale-[0.98]"
                       >
                         <Sparkles className="size-4" />
@@ -837,7 +840,7 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
                         </p>
                       </div>
                       <Button
-                        onClick={handleStartAnalysis}
+                        onClick={() => handleStartAnalysis({ force: retryAnalysisWithForce.current })}
                         variant="outline"
                         className="mt-2 gap-2 transition-transform active:scale-[0.98]"
                       >
@@ -861,7 +864,7 @@ export function EvaluationWorkspace({ reportId }: { reportId: string }) {
                         </p>
                       </div>
                       <Button
-                        onClick={handleStartAnalysis}
+                        onClick={() => handleStartAnalysis({ force: true })}
                         className="mt-2 gap-2 transition-transform active:scale-[0.98]"
                       >
                         <Sparkles className="size-4" />

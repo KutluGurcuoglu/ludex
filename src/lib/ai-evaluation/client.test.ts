@@ -43,8 +43,29 @@ describe("callAiEvaluation", () => {
     const [, , , options] = fetchCloudflareStructuredJson.mock.calls[0];
     expect(options).toEqual({
       model: "@cf/meta/llama-3.1-8b-instruct-fast",
-      maxTokens: 12000,
+      maxTokens: 8192,
     });
+  });
+
+  it("asks Cloudflare only for model-owned fields", async () => {
+    fetchCloudflareStructuredJson.mockResolvedValue(VALID_OUTPUT);
+
+    await callAiEvaluation("system prompt", "user prompt");
+
+    const [, , schema] = fetchCloudflareStructuredJson.mock.calls[0];
+    expect(schema.required).not.toContain("similarReports");
+    expect(schema.required).not.toContain("evidences");
+    expect(schema.required).not.toContain("overallComplianceStatus");
+    expect(schema.properties).not.toHaveProperty("contextHash");
+    expect(schema.required).toEqual(
+      expect.arrayContaining([
+        "languageAnalysis",
+        "specificationAnalysis",
+        "templateAnalysis",
+        "headingContentAnalysis",
+        "criteriaEvaluations",
+      ])
+    );
   });
 
   it("uses a small structured-output budget for the relevance preflight", async () => {

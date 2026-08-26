@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fetchCloudflareStructuredJson } from "./cloudflare-workers-ai";
+import { CloudflareAiTimeoutError, fetchCloudflareStructuredJson } from "./cloudflare-workers-ai";
 
 beforeEach(() => {
   vi.stubEnv("CLOUDFLARE_ACCOUNT_ID", "test-account");
@@ -27,9 +27,9 @@ describe("fetchCloudflareStructuredJson", () => {
       )
     );
 
-    await expect(
-      fetchCloudflareStructuredJson("system", "user", {}, { timeoutMs: 30 })
-    ).rejects.toThrow("Cloudflare Workers AI request timed out.");
+    const request = fetchCloudflareStructuredJson("system", "user", {}, { timeoutMs: 30 });
+    await expect(request).rejects.toBeInstanceOf(CloudflareAiTimeoutError);
+    await expect(request).rejects.toThrow("Cloudflare Workers AI request timed out.");
   });
 
   it("preserves the existing behavior for a successful Cloudflare response", async () => {
