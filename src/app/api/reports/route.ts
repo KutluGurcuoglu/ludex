@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { auth } from "@/auth";
 import { getStorageProvider } from "@/lib/storage";
@@ -127,14 +128,30 @@ export async function POST(req: Request) {
   const fileSizeBytes = head.contentLength;
 
   const reportRepository = getReportRepository();
-  const report = await reportRepository.create({
-    title,
-    contestantId: session.user.id,
-    categoryId,
-    fileName,
-    fileSizeBytes,
-    r2Key,
-  });
+  let report: ReportRecord;
+  try {
+    report = await reportRepository.create({
+      title,
+      contestantId: session.user.id,
+      categoryId,
+      fileName,
+      fileSizeBytes,
+      r2Key,
+    });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      const target = Array.isArray(error.meta?.target)
+        ? error.meta.target.join(",")
+        : String(error.meta?.target ?? "");
+      if (target.includes("contestantId") && target.includes("categoryId")) {
+        return NextResponse.json(
+          { error: "Bu kategori için zaten bir rapor gönderdiniz." },
+          { status: 409 }
+        );
+      }
+    }
+    throw error;
+  }
 
   try {
     const extractor = getTextExtractor();
