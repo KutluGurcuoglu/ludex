@@ -1,4 +1,4 @@
-import { useAppStore, type AppState } from "@/store/useAppStore";
+import { useAppStore } from "@/store/useAppStore";
 import type { SupportMessage } from "@/types";
 import { simulateNetworkDelay } from "./delay";
 
@@ -20,9 +20,19 @@ export function resolveSupportMessage(id: string): Promise<void> {
   return simulateNetworkDelay(undefined);
 }
 
-export function sendAnnouncement(
-  input: Parameters<AppState["sendAnnouncement"]>[0],
-): Promise<number> {
-  const count = useAppStore.getState().sendAnnouncement(input);
-  return simulateNetworkDelay(count);
+export async function sendAnnouncement(input: {
+  audience: "contestants" | "judges" | "both" | "custom";
+  userIds?: string[];
+  categoryId?: string;
+  title: string;
+  body?: string;
+}): Promise<number> {
+  const response = await fetch("/api/announcements", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error ?? "Duyuru gönderilemedi.");
+  return data.count;
 }

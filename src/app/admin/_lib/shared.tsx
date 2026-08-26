@@ -4,6 +4,7 @@ import { createContext, useContext, useRef, useState, type FormEvent, type React
 import { toast } from "sonner";
 import {
   AlertOctagon,
+  ClipboardCheck,
   FileText,
   Gavel,
   LayoutDashboard,
@@ -114,6 +115,7 @@ export const NAV_ITEMS = [
   { href: "/admin/judges", label: "Hakemler", icon: Gavel },
   { href: "/admin/judge-applications", label: "Hakem Başvuruları", icon: UserCheck },
   { href: "/admin/disqualifications", label: "Elenme Önerileri", icon: AlertOctagon },
+  { href: "/admin/results", label: "Sonuç Onayları", icon: ClipboardCheck },
   { href: "/admin/contestants", label: "Yarışmacılar", icon: Users },
   { href: "/admin/competitions", label: "Yarışmalar", icon: Trophy },
   { href: "/admin/criteria", label: "Değerlendirme Kriterleri", icon: ListChecks },
