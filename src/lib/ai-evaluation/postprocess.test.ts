@@ -35,6 +35,16 @@ function baseEvaluation(): EvaluationOutput {
       { sectionId: "sec-1", headingPresent: true, contentMatchesExpectation: true, notes: "ok" },
     ],
     categoryFit: { fit: true, reason: "uygun" },
+    relevanceAnalysis: {
+      status: "relevant",
+      specificationRuleIds: ["spec-rule-1"],
+      reportPageNumber: 1,
+      reportExcerpt: "Giriş bölümü burada başlar.",
+      explanation: "uygun",
+      confidence: 0.9,
+      mappedConcepts: ["konu"],
+    },
+    overallComplianceStatus: "compliant",
     criteriaEvaluations: [{ criterionId: "crit-1", score: 8, reason: "iyi" }],
     strengths: [],
     areasForImprovement: [],
@@ -83,5 +93,18 @@ describe("attachVerifiedEvidence", () => {
     expect(result.strengths).toEqual(["İçerik güçlü."]);
     expect(result.areasForImprovement).toEqual(["Başlık seviyelerinde tutarsızlık"]);
     expect(result.recommendations).toEqual(["Özet bölümü ekleyin."]);
+  });
+
+  it("keeps persisted evidence IDs unique even when raw heading IDs repeat", () => {
+    const evaluation = baseEvaluation();
+    evaluation.headingContentAnalysis = [
+      { sectionId: "sec-1", headingPresent: true, contentMatchesExpectation: true, notes: "one", pageNumber: 1, exactExcerpt: "Giriş bölümü burada başlar." },
+      { sectionId: "sec-1", headingPresent: true, contentMatchesExpectation: true, notes: "two", pageNumber: 1, exactExcerpt: "Giriş bölümü burada başlar." },
+    ];
+
+    const result = attachVerifiedEvidence(evaluation, PAGES);
+    expect(new Set(result.evidences.map((evidence) => evidence.id)).size).toBe(
+      result.evidences.length
+    );
   });
 });

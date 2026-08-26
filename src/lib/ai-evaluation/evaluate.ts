@@ -1,10 +1,17 @@
 import {
   evaluationInputSchema,
   evaluationOutputSchema,
+  relevancePreflightInputSchema,
   type EvaluationOutput,
+  type RelevanceAnalysis,
 } from "./schema";
-import { SYSTEM_PROMPT, buildEvaluationPrompt } from "./prompts";
-import { callAiEvaluation } from "./client";
+import {
+  RELEVANCE_PREFLIGHT_SYSTEM_PROMPT,
+  SYSTEM_PROMPT,
+  buildEvaluationPrompt,
+  buildRelevancePreflightPrompt,
+} from "./prompts";
+import { callAiEvaluation, callAiRelevancePreflight } from "./client";
 
 export async function evaluateReport(input: unknown): Promise<EvaluationOutput> {
   const validatedInput = evaluationInputSchema.parse(input);
@@ -19,4 +26,12 @@ export async function evaluateReport(input: unknown): Promise<EvaluationOutput> 
   }
 
   return parsedOutput.data;
+}
+
+export async function evaluateRelevancePreflight(input: unknown): Promise<RelevanceAnalysis> {
+  const validatedInput = relevancePreflightInputSchema.parse(input);
+  return callAiRelevancePreflight(
+    RELEVANCE_PREFLIGHT_SYSTEM_PROMPT,
+    buildRelevancePreflightPrompt(validatedInput)
+  );
 }

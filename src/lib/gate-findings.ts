@@ -10,6 +10,8 @@ export interface GateFinding {
   findingText: string;
   probability: Severity;
   evidenceId: string | null;
+  allowsElimination: boolean;
+  sourceLabel?: string;
 }
 
 /**
@@ -25,6 +27,8 @@ export function buildGateFindings(analysis: AIAnalysisResult): GateFinding[] {
     findingText: f.findingText,
     probability: f.probability,
     evidenceId: f.evidenceId,
+    allowsElimination: f.classification === "disqualification",
+    sourceLabel: f.sourceLabel,
   }));
   const criticalFindingIds = new Set(analysis.criticalFindings.map((finding) => finding.id));
 
@@ -37,6 +41,7 @@ export function buildGateFindings(analysis: AIAnalysisResult): GateFinding[] {
       findingText: `Tespit edilen dil: ${analysis.languageCheck.detectedLanguage} (güven: %${analysis.languageCheck.confidence})`,
       probability: analysis.languageCheck.confidence >= 80 ? "high" : "medium",
       evidenceId: null,
+      allowsElimination: false,
     });
   }
 
@@ -51,6 +56,8 @@ export function buildGateFindings(analysis: AIAnalysisResult): GateFinding[] {
         findingText: item.detail,
         probability: "medium",
         evidenceId: item.evidenceIds[0] ?? null,
+        allowsElimination: item.decisionSupport === "disqualification",
+        sourceLabel: item.sourceLabel,
       });
     });
 
