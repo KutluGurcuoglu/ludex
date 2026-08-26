@@ -21,6 +21,11 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Ludex",
   description: "AI Destekli Akıllı Yarışma Rapor Değerlendirme Platformu",
+  icons: {
+    icon: "/ludex-icon-v2.png",
+    shortcut: "/ludex-icon-v2.png",
+    apple: "/ludex-icon-v2.png",
+  },
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

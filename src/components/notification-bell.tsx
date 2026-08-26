@@ -53,7 +53,7 @@ export function NotificationBell() {
   if (!user) return null;
 
   return (
-    <DropdownMenu open={open} onOpenChange={setOpen}>
+    <DropdownMenu modal={false} open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" size="icon" className="relative size-8" aria-label="Bildirimler">
           <Bell className="size-4" />
