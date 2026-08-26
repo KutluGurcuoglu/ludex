@@ -11,8 +11,8 @@ export function ReportScanVisual({ className }: { className?: string }) {
         aria-hidden="true"
       />
 
-      <div className="relative overflow-hidden rounded-2xl border border-border/60 bg-card/90 shadow-2xl backdrop-blur-sm">
-        <div className="flex items-center gap-2 border-b border-border/60 px-4 py-3">
+      <div className="relative overflow-hidden rounded-[28px] border border-border/60 bg-card/90 shadow-2xl inset-shadow-sm inset-shadow-white/10 backdrop-blur-md dark:border-white/10 dark:bg-black/40">
+        <div className="flex items-center gap-2 border-b border-border/60 px-4 py-3 dark:border-white/10">
           <span className="size-2.5 rounded-full bg-destructive/60" />
           <span className="size-2.5 rounded-full bg-[var(--brand-glow-3)]/60" />
           <span className="size-2.5 rounded-full bg-primary/60" />
@@ -34,7 +34,7 @@ export function ReportScanVisual({ className }: { className?: string }) {
         </div>
       </div>
 
-      <div className="absolute -right-4 top-6 animate-float-slow rounded-xl border border-border/60 bg-card px-3 py-2 text-xs font-semibold shadow-lg sm:-right-8">
+      <div className="absolute -right-4 top-6 animate-float-slow rounded-full border border-border/60 bg-card/90 px-4 py-2 text-xs font-semibold shadow-lg backdrop-blur-md sm:-right-8 dark:border-white/15 dark:bg-black/40">
         <span className="flex items-center gap-1.5 text-primary">
           <BrainCircuit className="size-3.5" />
           AI Skoru: 92
@@ -42,7 +42,7 @@ export function ReportScanVisual({ className }: { className?: string }) {
       </div>
 
       <div
-        className="absolute -left-4 bottom-16 animate-float-slow rounded-xl border border-border/60 bg-card px-3 py-2 text-xs font-semibold shadow-lg sm:-left-8"
+        className="absolute -left-4 bottom-16 animate-float-slow rounded-full border border-border/60 bg-card/90 px-4 py-2 text-xs font-semibold shadow-lg backdrop-blur-md sm:-left-8 dark:border-white/15 dark:bg-black/40"
         style={{ animationDelay: "1s" }}
       >
         <span className="flex items-center gap-1.5 text-[var(--brand-glow-2)]">
@@ -52,7 +52,7 @@ export function ReportScanVisual({ className }: { className?: string }) {
       </div>
 
       <div
-        className="absolute -right-2 bottom-0 animate-float-slow rounded-xl border border-border/60 bg-card px-3 py-2 text-xs font-semibold shadow-lg sm:-right-6"
+        className="absolute -right-2 bottom-0 animate-float-slow rounded-full border border-border/60 bg-card/90 px-4 py-2 text-xs font-semibold shadow-lg backdrop-blur-md sm:-right-6 dark:border-white/15 dark:bg-black/40"
         style={{ animationDelay: "1.8s" }}
       >
         <span className="flex items-center gap-1.5 text-[var(--brand-glow-3)]">
